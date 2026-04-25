@@ -87,7 +87,7 @@ router.post("/webhook", async (req, res) => {
     await enviarMensaje(telefono, resultado.texto);
 
   } catch (error) {
-    logger.error("Error procesando webhook:", error.message);
+    logger.error("Error procesando webhook: " + error.message + " - " + error.stack);
   }
 });
 
