@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard — Restaurante Japonés</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --rojo: #C0392B;
+    --rojo-suave: #E8D5D3;
+    --negro: #1A1A1A;
+    --gris: #4A4A4A;
+    --gris-claro: #F5F3F0;
+    --borde: #E0DBD5;
+    --blanco: #FEFCFA;
+    --pendiente: #D4860A;
+    --pendiente-bg: #FDF3E0;
+    --en-proceso: #1A6FA8;
+    --en-proceso-bg: #E3F0FA;
+    --listo: #1E8C4A;
+    --listo-bg: #E2F5EA;
+    --cancelado: #888;
+    --cancelado-bg: #F0F0F0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'DM Mono', monospace;
+    background: var(--gris-claro);
+    color: var(--negro);
+    min-height: 100vh;
+  }
+
+  /* HEADER */
+  header {
+    background: var(--negro);
+    color: var(--blanco);
+    padding: 0 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 64px;
+    border-bottom: 3px solid var(--rojo);
+  }
+  .header-brand {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+  .header-kanji {
+    font-family: 'Noto Serif JP', serif;
+    font-size: 1.6rem;
+    color: var(--rojo);
+    line-height: 1;
+  }
+  .header-title {
+    font-size: 0.75rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    opacity: 0.7;
+  }
+  .header-time {
+    font-size: 0.8rem;
+    opacity: 0.5;
+    letter-spacing: 0.05em;
+  }
+
+  /* STATS */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--borde);
+    border-bottom: 1px solid var(--borde);
+  }
+  .stat {
+    background: var(--blanco);
+    padding: 1.2rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .stat-num {
+    font-family: 'Noto Serif JP', serif;
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .stat-label {
+    font-size: 0.65rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gris);
+  }
+  .stat-num.rojo { color: var(--rojo); }
+  .stat-num.naranja { color: var(--pendiente); }
+  .stat-num.verde { color: var(--listo); }
+  .stat-num.azul { color: var(--en-proceso); }
+
+  /* TABS */
+  .tabs {
+    display: flex;
+    background: var(--blanco);
+    border-bottom: 1px solid var(--borde);
+    padding: 0 2rem;
+  }
+  .tab {
+    padding: 1rem 1.5rem;
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    color: var(--gris);
+    transition: all 0.2s;
+    background: none;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    font-family: 'DM Mono', monospace;
+  }
+  .tab:hover { color: var(--negro); }
+  .tab.active { color: var(--rojo); border-bottom-color: var(--rojo); }
+
+  /* CONTENIDO */
+  .content { padding: 1.5rem 2rem; }
+
+  /* FILTROS */
+  .filtros {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.2rem;
+    flex-wrap: wrap;
+  }
+  .filtro-btn {
+    padding: 0.35rem 0.9rem;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border: 1px solid var(--borde);
+    background: var(--blanco);
+    cursor: pointer;
+    border-radius: 2px;
+    font-family: 'DM Mono', monospace;
+    color: var(--gris);
+    transition: all 0.15s;
+  }
+  .filtro-btn:hover { border-color: var(--negro); color: var(--negro); }
+  .filtro-btn.active { background: var(--negro); color: var(--blanco); border-color: var(--negro); }
+
+  /* TABLA */
+  .tabla-wrap { background: var(--blanco); border: 1px solid var(--borde); border-radius: 4px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    background: var(--negro);
+    color: var(--blanco);
+    padding: 0.7rem 1rem;
+    text-align: left;
+    font-size: 0.65rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+  td {
+    padding: 0.85rem 1rem;
+    font-size: 0.78rem;
+    border-bottom: 1px solid var(--borde);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--gris-claro); }
+
+  .badge {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-radius: 2px;
+    font-weight: 500;
+  }
+  .badge.pendiente { background: var(--pendiente-bg); color: var(--pendiente); }
+  .badge.en_proceso { background: var(--en-proceso-bg); color: var(--en-proceso); }
+  .badge.listo { background: var(--listo-bg); color: var(--listo); }
+  .badge.cancelado { background: var(--cancelado-bg); color: var(--cancelado); }
+  .badge.confirmada { background: var(--listo-bg); color: var(--listo); }
+
+  .id-cell { font-size: 0.65rem; color: var(--gris); letter-spacing: 0.05em; }
+  .items-list { font-size: 0.72rem; color: var(--gris); margin-top: 0.2rem; line-height: 1.6; }
+  .total { font-weight: 500; color: var(--rojo); }
+
+  .acciones { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  .btn-accion {
+    padding: 0.25rem 0.6rem;
+    font-size: 0.62rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border: 1px solid var(--borde);
+    background: none;
+    cursor: pointer;
+    border-radius: 2px;
+    font-family: 'DM Mono', monospace;
+    color: var(--gris);
+    transition: all 0.15s;
+  }
+  .btn-accion:hover { background: var(--negro); color: var(--blanco); border-color: var(--negro); }
+  .btn-accion.verde:hover { background: var(--listo); border-color: var(--listo); }
+  .btn-accion.rojo:hover { background: var(--rojo); border-color: var(--rojo); }
+
+  .vacio {
+    text-align: center;
+    padding: 3rem;
+    color: var(--gris);
+    font-size: 0.8rem;
+    letter-spacing: 0.05em;
+  }
+  .vacio-kanji { font-family: 'Noto Serif JP', serif; font-size: 2.5rem; display: block; margin-bottom: 0.5rem; opacity: 0.15; }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .refresh-btn {
+    margin-left: auto;
+    padding: 0.35rem 0.9rem;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border: 1px solid var(--borde);
+    background: var(--blanco);
+    cursor: pointer;
+    border-radius: 2px;
+    font-family: 'DM Mono', monospace;
+    color: var(--gris);
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .refresh-btn:hover { border-color: var(--negro); color: var(--negro); }
+
+  @media (max-width: 768px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .content { padding: 1rem; }
+    table { font-size: 0.72rem; }
+    th, td { padding: 0.6rem 0.7rem; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-brand">
+    <span class="header-kanji">食</span>
+    <div>
+      <div style="font-size:0.9rem;font-weight:500;letter-spacing:0.05em">Panel de Control</div>
+      <div class="header-title">Restaurante Japonés · Agente WhatsApp</div>
+    </div>
+  </div>
+  <div class="header-time" id="reloj"></div>
+</header>
+
+<div class="stats">
+  <div class="stat">
+    <div class="stat-num rojo" id="stat-total">0</div>
+    <div class="stat-label">Pedidos hoy</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num naranja" id="stat-pendientes">0</div>
+    <div class="stat-label">Pendientes</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num azul" id="stat-proceso">0</div>
+    <div class="stat-label">En proceso</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num verde" id="stat-listos">0</div>
+    <div class="stat-label">Completados</div>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab active" onclick="cambiarTab('pedidos', this)">Pedidos</button>
+  <button class="tab" onclick="cambiarTab('reservaciones', this)">Reservaciones</button>
+  <button class="refresh-btn" onclick="cargarDatos()">↻ Actualizar</button>
+</div>
+
+<!-- PANEL PEDIDOS -->
+<div class="content panel active" id="panel-pedidos">
+  <div class="filtros">
+    <button class="filtro-btn active" onclick="filtrar('todos', this)">Todos</button>
+    <button class="filtro-btn" onclick="filtrar('pendiente', this)">Pendientes</button>
+    <button class="filtro-btn" onclick="filtrar('en_proceso', this)">En proceso</button>
+    <button class="filtro-btn" onclick="filtrar('listo', this)">Listos</button>
+    <button class="filtro-btn" onclick="filtrar('cancelado', this)">Cancelados</button>
+  </div>
+  <div class="tabla-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID / Hora</th>
+          <th>Cliente</th>
+          <th>Pedido</th>
+          <th>Sucursal</th>
+          <th>Total</th>
+          <th>Estado</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="tbody-pedidos">
+        <tr><td colspan="7" class="vacio"><span class="vacio-kanji">待</span>Cargando pedidos...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- PANEL RESERVACIONES -->
+<div class="content panel" id="panel-reservaciones">
+  <div class="tabla-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Nombre</th>
+          <th>Teléfono</th>
+          <th>Fecha / Hora</th>
+          <th>Personas</th>
+          <th>Sucursal</th>
+          <th>Estado</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="tbody-reservaciones">
+        <tr><td colspan="8" class="vacio"><span class="vacio-kanji">待</span>Cargando reservaciones...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let todosLosPedidos = [];
+let filtroActual = 'todos';
+
+// Reloj
+function actualizarReloj() {
+  const ahora = new Date();
+  document.getElementById('reloj').textContent =
+    ahora.toLocaleString('es-MX', { weekday:'short', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+setInterval(actualizarReloj, 1000);
+actualizarReloj();
+
+// Cargar datos
+async function cargarDatos() {
+  await Promise.all([cargarPedidos(), cargarReservaciones()]);
+}
+
+async function cargarPedidos() {
+  try {
+    const r = await fetch('/api/pedidos');
+    todosLosPedidos = await r.json();
+    renderPedidos(todosLosPedidos);
+    actualizarStats(todosLosPedidos);
+  } catch {
+    document.getElementById('tbody-pedidos').innerHTML =
+      '<tr><td colspan="7" class="vacio"><span class="vacio-kanji">空</span>No hay datos aún. Inicia el agente y realiza un pedido de prueba.</td></tr>';
+  }
+}
+
+async function cargarReservaciones() {
+  try {
+    const r = await fetch('/api/reservaciones');
+    const reservaciones = await r.json();
+    renderReservaciones(reservaciones);
+  } catch {
+    document.getElementById('tbody-reservaciones').innerHTML =
+      '<tr><td colspan="8" class="vacio"><span class="vacio-kanji">空</span>Sin reservaciones aún.</td></tr>';
+  }
+}
+
+function actualizarStats(pedidos) {
+  const hoy = new Date().toDateString();
+  const pedidosHoy = pedidos.filter(p => new Date(p.fecha).toDateString() === hoy);
+  document.getElementById('stat-total').textContent = pedidosHoy.length;
+  document.getElementById('stat-pendientes').textContent = pedidosHoy.filter(p => p.estado === 'pendiente').length;
+  document.getElementById('stat-proceso').textContent = pedidosHoy.filter(p => p.estado === 'en_proceso').length;
+  document.getElementById('stat-listos').textContent = pedidosHoy.filter(p => p.estado === 'listo').length;
+}
+
+function renderPedidos(pedidos) {
+  const filtrados = filtroActual === 'todos' ? pedidos : pedidos.filter(p => p.estado === filtroActual);
+  const tbody = document.getElementById('tbody-pedidos');
+  if (!filtrados.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="vacio"><span class="vacio-kanji">空</span>No hay pedidos con este filtro.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = filtrados.map(p => {
+    const items = Array.isArray(p.items)
+      ? p.items.map(i => `${i.cantidad || 1}× ${i.nombre}`).join(', ')
+      : (p.items || '—');
+    const total = Array.isArray(p.items)
+      ? p.items.reduce((s, i) => s + (i.precio || 0) * (i.cantidad || 1), 0)
+      : '—';
+    const hora = new Date(p.fecha).toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit' });
+    return `
+    <tr>
+      <td><div class="id-cell">${p.id}</div><div style="font-size:0.7rem;color:var(--gris);margin-top:2px">${hora}</div></td>
+      <td>${p.telefono_cliente || '—'}</td>
+      <td><div>${items}</div></td>
+      <td>${p.sucursal || '—'}</td>
+      <td class="total">${total !== '—' ? '$' + total + ' MXN' : '—'}</td>
+      <td><span class="badge ${p.estado}">${p.estado.replace('_', ' ')}</span></td>
+      <td>
+        <div class="acciones">
+          ${p.estado === 'pendiente' ? `<button class="btn-accion azul" onclick="cambiarEstado('pedido','${p.id}','en_proceso')">En proceso</button>` : ''}
+          ${p.estado !== 'listo' && p.estado !== 'cancelado' ? `<button class="btn-accion verde" onclick="cambiarEstado('pedido','${p.id}','listo')">Listo</button>` : ''}
+          ${p.estado !== 'cancelado' ? `<button class="btn-accion rojo" onclick="cambiarEstado('pedido','${p.id}','cancelado')">Cancelar</button>` : ''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function renderReservaciones(reservaciones) {
+  const tbody = document.getElementById('tbody-reservaciones');
+  if (!reservaciones.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="vacio"><span class="vacio-kanji">空</span>Sin reservaciones aún.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = reservaciones.map(r => `
+    <tr>
+      <td class="id-cell">${r.id}</td>
+      <td>${r.nombre || '—'}</td>
+      <td>${r.telefono_cliente || '—'}</td>
+      <td>${r.fecha || '—'} ${r.hora || ''}</td>
+      <td>${r.personas || '—'}</td>
+      <td>${r.sucursal || '—'}</td>
+      <td><span class="badge ${r.estado}">${r.estado}</span></td>
+      <td>
+        <div class="acciones">
+          ${r.estado !== 'cancelada' ? `<button class="btn-accion rojo" onclick="cambiarEstado('reservacion','${r.id}','cancelada')">Cancelar</button>` : ''}
+        </div>
+      </td>
+    </tr>`).join('');
+}
+
+async function cambiarEstado(tipo, id, estado) {
+  const url = tipo === 'pedido' ? `/api/pedidos/${id}/estado` : `/api/reservaciones/${id}/estado`;
+  await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ estado })
+  });
+  cargarDatos();
+}
+
+function filtrar(estado, btn) {
+  filtroActual = estado;
+  document.querySelectorAll('.filtro-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderPedidos(todosLosPedidos);
+}
+
+function cambiarTab(tab, btn) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('panel-' + tab).classList.add('active');
+}
+
+// Auto-actualizar cada 30 segundos
+setInterval(cargarDatos, 30000);
+cargarDatos();
+</script>
+</body>
+</html>

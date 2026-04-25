@@ -1,0 +1,4 @@
+[2026-04-24 21:40:32] INFO: Agente iniciado en puerto 3000 🍣
+[2026-04-24 21:40:32] INFO: WhatsApp webhook:  http://localhost:3000/webhook
+[2026-04-24 21:40:32] INFO: Llamadas entrante: http://localhost:3000/llamada/entrante
+[2026-04-24 21:40:32] INFO: Dashboard:         http://localhost:3000/dashboard
