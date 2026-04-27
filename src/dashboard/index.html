@@ -3,453 +3,514 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Dashboard — Restaurante Japonés</title>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<title>Mr. Sushi — Panel de Control</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700&family=DM+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --rojo: #C0392B;
-    --rojo-suave: #E8D5D3;
-    --negro: #1A1A1A;
-    --gris: #4A4A4A;
-    --gris-claro: #F5F3F0;
-    --borde: #E0DBD5;
-    --blanco: #FEFCFA;
-    --pendiente: #D4860A;
-    --pendiente-bg: #FDF3E0;
-    --en-proceso: #1A6FA8;
-    --en-proceso-bg: #E3F0FA;
-    --listo: #1E8C4A;
-    --listo-bg: #E2F5EA;
-    --cancelado: #888;
-    --cancelado-bg: #F0F0F0;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: 'DM Mono', monospace;
-    background: var(--gris-claro);
-    color: var(--negro);
-    min-height: 100vh;
-  }
+:root {
+  --rojo: #C0392B;
+  --rojo-h: #E74C3C;
+  --negro: #111111;
+  --carbon: #1A1A1A;
+  --gris1: #242424;
+  --gris2: #2E2E2E;
+  --gris3: #3A3A3A;
+  --texto: #E8E4DF;
+  --muted: #888078;
+  --borde: #333333;
+  --blanco: #FEFCFA;
+  --verde: #1E8C4A;
+  --naranja: #D4860A;
+  --azul: #1A6FA8;
+  --pendiente-bg: #2A1E00;
+  --proceso-bg: #001830;
+  --listo-bg: #001A0E;
+  --cancelado-bg: #1A1A1A;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; font-family: 'DM Mono', monospace; background: var(--negro); color: var(--texto); }
 
-  /* HEADER */
-  header {
-    background: var(--negro);
-    color: var(--blanco);
-    padding: 0 2rem;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    height: 64px;
-    border-bottom: 3px solid var(--rojo);
-  }
-  .header-brand {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-  }
-  .header-kanji {
-    font-family: 'Noto Serif JP', serif;
-    font-size: 1.6rem;
-    color: var(--rojo);
-    line-height: 1;
-  }
-  .header-title {
-    font-size: 0.75rem;
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-    opacity: 0.7;
-  }
-  .header-time {
-    font-size: 0.8rem;
-    opacity: 0.5;
-    letter-spacing: 0.05em;
-  }
+/* ── LOGIN ── */
+#login-screen {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 100vh;
+  background: var(--negro);
+  background-image: radial-gradient(ellipse at 20% 50%, #1a0000 0%, transparent 60%),
+                    radial-gradient(ellipse at 80% 20%, #0a0a0a 0%, transparent 50%);
+}
+.login-box {
+  width: 380px;
+  border: 1px solid var(--borde);
+  background: var(--carbon);
+  padding: 2.5rem;
+  position: relative;
+}
+.login-box::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: var(--rojo);
+}
+.login-kanji {
+  font-family: 'Noto Serif JP', serif;
+  font-size: 3.5rem; color: var(--rojo);
+  opacity: 0.15; position: absolute;
+  top: 1rem; right: 1.5rem; line-height: 1;
+  pointer-events: none;
+}
+.login-title { font-size: 0.65rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.3rem; }
+.login-sub { font-size: 1.4rem; color: var(--blanco); margin-bottom: 2rem; font-family: 'Noto Serif JP', serif; }
+.login-label { font-size: 0.6rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted); display: block; margin-bottom: 0.4rem; }
+.login-input {
+  width: 100%; background: var(--gris1); border: 1px solid var(--borde);
+  color: var(--texto); font-family: 'DM Mono', monospace; font-size: 0.9rem;
+  padding: 0.65rem 0.8rem; margin-bottom: 1.2rem; outline: none;
+  transition: border-color 0.2s;
+}
+.login-input:focus { border-color: var(--rojo); }
+.login-btn {
+  width: 100%; background: var(--rojo); color: var(--blanco);
+  border: none; padding: 0.8rem; font-family: 'DM Mono', monospace;
+  font-size: 0.75rem; letter-spacing: 0.15em; text-transform: uppercase;
+  cursor: pointer; transition: background 0.2s;
+}
+.login-btn:hover { background: var(--rojo-h); }
+.login-error { color: var(--rojo); font-size: 0.75rem; margin-top: 0.8rem; min-height: 1rem; }
 
-  /* STATS */
-  .stats {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1px;
-    background: var(--borde);
-    border-bottom: 1px solid var(--borde);
-  }
-  .stat {
-    background: var(--blanco);
-    padding: 1.2rem 1.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-  }
-  .stat-num {
-    font-family: 'Noto Serif JP', serif;
-    font-size: 2rem;
-    font-weight: 700;
-    line-height: 1;
-  }
-  .stat-label {
-    font-size: 0.65rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--gris);
-  }
-  .stat-num.rojo { color: var(--rojo); }
-  .stat-num.naranja { color: var(--pendiente); }
-  .stat-num.verde { color: var(--listo); }
-  .stat-num.azul { color: var(--en-proceso); }
+/* ── DASHBOARD ── */
+#app { display: none; height: 100vh; flex-direction: column; }
 
-  /* TABS */
-  .tabs {
-    display: flex;
-    background: var(--blanco);
-    border-bottom: 1px solid var(--borde);
-    padding: 0 2rem;
-  }
-  .tab {
-    padding: 1rem 1.5rem;
-    font-size: 0.75rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-    color: var(--gris);
-    transition: all 0.2s;
-    background: none;
-    border-left: none;
-    border-right: none;
-    border-top: none;
-    font-family: 'DM Mono', monospace;
-  }
-  .tab:hover { color: var(--negro); }
-  .tab.active { color: var(--rojo); border-bottom-color: var(--rojo); }
+/* Header */
+.header {
+  background: var(--carbon); border-bottom: 1px solid var(--borde);
+  padding: 0 1.5rem; height: 56px;
+  display: flex; align-items: center; justify-content: space-between;
+  flex-shrink: 0;
+}
+.header-left { display: flex; align-items: center; gap: 1rem; }
+.header-kanji { font-family: 'Noto Serif JP', serif; font-size: 1.4rem; color: var(--rojo); line-height: 1; }
+.header-info { display: flex; flex-direction: column; }
+.header-name { font-size: 0.85rem; color: var(--blanco); font-weight: 500; }
+.header-sucursal { font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--rojo); }
+.header-right { display: flex; align-items: center; gap: 1rem; }
+.header-time { font-size: 0.75rem; color: var(--muted); }
+.logout-btn {
+  background: none; border: 1px solid var(--borde); color: var(--muted);
+  font-family: 'DM Mono', monospace; font-size: 0.6rem; letter-spacing: 0.1em;
+  text-transform: uppercase; padding: 0.3rem 0.7rem; cursor: pointer;
+  transition: all 0.2s;
+}
+.logout-btn:hover { border-color: var(--rojo); color: var(--rojo); }
 
-  /* CONTENIDO */
-  .content { padding: 1.5rem 2rem; }
+/* Tabs */
+.tabs {
+  background: var(--carbon); border-bottom: 1px solid var(--borde);
+  padding: 0 1.5rem; display: flex; align-items: center; gap: 0; flex-shrink: 0;
+}
+.tab {
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--muted); font-family: 'DM Mono', monospace;
+  font-size: 0.65rem; letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 0.85rem 1.2rem; cursor: pointer; transition: all 0.2s;
+}
+.tab:hover { color: var(--texto); }
+.tab.active { color: var(--rojo); border-bottom-color: var(--rojo); }
+.refresh-btn {
+  margin-left: auto; background: none; border: 1px solid var(--borde);
+  color: var(--muted); font-family: 'DM Mono', monospace; font-size: 0.65rem;
+  letter-spacing: 0.08em; padding: 0.3rem 0.8rem; cursor: pointer;
+  transition: all 0.2s;
+}
+.refresh-btn:hover { border-color: var(--texto); color: var(--texto); }
 
-  /* FILTROS */
-  .filtros {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1.2rem;
-    flex-wrap: wrap;
-  }
-  .filtro-btn {
-    padding: 0.35rem 0.9rem;
-    font-size: 0.68rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    border: 1px solid var(--borde);
-    background: var(--blanco);
-    cursor: pointer;
-    border-radius: 2px;
-    font-family: 'DM Mono', monospace;
-    color: var(--gris);
-    transition: all 0.15s;
-  }
-  .filtro-btn:hover { border-color: var(--negro); color: var(--negro); }
-  .filtro-btn.active { background: var(--negro); color: var(--blanco); border-color: var(--negro); }
+/* Stats bar */
+.stats-bar {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  border-bottom: 1px solid var(--borde); flex-shrink: 0;
+}
+.stat-item {
+  padding: 0.9rem 1.5rem; border-right: 1px solid var(--borde);
+  display: flex; flex-direction: column; gap: 0.2rem;
+}
+.stat-item:last-child { border-right: none; }
+.stat-num { font-family: 'Noto Serif JP', serif; font-size: 1.8rem; line-height: 1; }
+.stat-label { font-size: 0.58rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.stat-num.c-rojo { color: var(--rojo); }
+.stat-num.c-naranja { color: var(--naranja); }
+.stat-num.c-azul { color: var(--azul); }
+.stat-num.c-verde { color: var(--verde); }
 
-  /* TABLA */
-  .tabla-wrap { background: var(--blanco); border: 1px solid var(--borde); border-radius: 4px; overflow: hidden; }
-  table { width: 100%; border-collapse: collapse; }
-  th {
-    background: var(--negro);
-    color: var(--blanco);
-    padding: 0.7rem 1rem;
-    text-align: left;
-    font-size: 0.65rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    font-weight: 500;
-  }
-  td {
-    padding: 0.85rem 1rem;
-    font-size: 0.78rem;
-    border-bottom: 1px solid var(--borde);
-    vertical-align: top;
-  }
-  tr:last-child td { border-bottom: none; }
-  tr:hover td { background: var(--gris-claro); }
+/* Content */
+.content { flex: 1; overflow-y: auto; padding: 1.2rem 1.5rem; }
+.panel { display: none; }
+.panel.active { display: block; }
 
-  .badge {
-    display: inline-block;
-    padding: 0.2rem 0.6rem;
-    font-size: 0.62rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    border-radius: 2px;
-    font-weight: 500;
-  }
-  .badge.pendiente { background: var(--pendiente-bg); color: var(--pendiente); }
-  .badge.en_proceso { background: var(--en-proceso-bg); color: var(--en-proceso); }
-  .badge.listo { background: var(--listo-bg); color: var(--listo); }
-  .badge.cancelado { background: var(--cancelado-bg); color: var(--cancelado); }
-  .badge.confirmada { background: var(--listo-bg); color: var(--listo); }
+/* Filtros */
+.filtros { display: flex; gap: 0.4rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
+.filtro-btn {
+  background: none; border: 1px solid var(--borde); color: var(--muted);
+  font-family: 'DM Mono', monospace; font-size: 0.6rem; letter-spacing: 0.08em;
+  text-transform: uppercase; padding: 0.3rem 0.8rem; cursor: pointer;
+  transition: all 0.15s;
+}
+.filtro-btn:hover { border-color: var(--texto); color: var(--texto); }
+.filtro-btn.active { background: var(--texto); color: var(--negro); border-color: var(--texto); }
 
-  .id-cell { font-size: 0.65rem; color: var(--gris); letter-spacing: 0.05em; }
-  .items-list { font-size: 0.72rem; color: var(--gris); margin-top: 0.2rem; line-height: 1.6; }
-  .total { font-weight: 500; color: var(--rojo); }
+/* Tabla */
+.tabla-wrap { border: 1px solid var(--borde); overflow: hidden; }
+table { width: 100%; border-collapse: collapse; }
+th {
+  background: var(--gris1); color: var(--muted);
+  padding: 0.6rem 0.9rem; text-align: left;
+  font-size: 0.58rem; letter-spacing: 0.12em; text-transform: uppercase;
+  font-weight: 500; border-bottom: 1px solid var(--borde);
+}
+td {
+  padding: 0.75rem 0.9rem; font-size: 0.75rem;
+  border-bottom: 1px solid var(--borde); vertical-align: top;
+}
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--gris1); }
 
-  .acciones { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-  .btn-accion {
-    padding: 0.25rem 0.6rem;
-    font-size: 0.62rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    border: 1px solid var(--borde);
-    background: none;
-    cursor: pointer;
-    border-radius: 2px;
-    font-family: 'DM Mono', monospace;
-    color: var(--gris);
-    transition: all 0.15s;
-  }
-  .btn-accion:hover { background: var(--negro); color: var(--blanco); border-color: var(--negro); }
-  .btn-accion.verde:hover { background: var(--listo); border-color: var(--listo); }
-  .btn-accion.rojo:hover { background: var(--rojo); border-color: var(--rojo); }
+.id-cell { font-size: 0.6rem; color: var(--muted); letter-spacing: 0.04em; }
+.hora-cell { font-size: 0.65rem; color: var(--muted); margin-top: 2px; }
+.total { color: var(--rojo); font-weight: 500; }
 
-  .vacio {
-    text-align: center;
-    padding: 3rem;
-    color: var(--gris);
-    font-size: 0.8rem;
-    letter-spacing: 0.05em;
-  }
-  .vacio-kanji { font-family: 'Noto Serif JP', serif; font-size: 2.5rem; display: block; margin-bottom: 0.5rem; opacity: 0.15; }
+/* Badges */
+.badge {
+  display: inline-block; padding: 0.15rem 0.5rem;
+  font-size: 0.58rem; letter-spacing: 0.08em; text-transform: uppercase;
+}
+.badge.pendiente   { background: var(--pendiente-bg); color: var(--naranja); }
+.badge.en_proceso  { background: var(--proceso-bg);   color: var(--azul); }
+.badge.listo       { background: var(--listo-bg);     color: var(--verde); }
+.badge.cancelado   { background: var(--cancelado-bg); color: var(--muted); }
+.badge.confirmada  { background: var(--listo-bg);     color: var(--verde); }
+.badge.cancelada   { background: var(--cancelado-bg); color: var(--muted); }
 
-  .panel { display: none; }
-  .panel.active { display: block; }
+/* Acciones */
+.acciones { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.btn-accion {
+  background: none; border: 1px solid var(--borde); color: var(--muted);
+  font-family: 'DM Mono', monospace; font-size: 0.58rem; letter-spacing: 0.06em;
+  text-transform: uppercase; padding: 0.2rem 0.5rem; cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-accion:hover { background: var(--gris2); color: var(--texto); }
+.btn-accion.verde:hover  { background: var(--verde); border-color: var(--verde); color: var(--blanco); }
+.btn-accion.rojo:hover   { background: var(--rojo);  border-color: var(--rojo);  color: var(--blanco); }
+.btn-accion.azul:hover   { background: var(--azul);  border-color: var(--azul);  color: var(--blanco); }
 
-  .refresh-btn {
-    margin-left: auto;
-    padding: 0.35rem 0.9rem;
-    font-size: 0.68rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    border: 1px solid var(--borde);
-    background: var(--blanco);
-    cursor: pointer;
-    border-radius: 2px;
-    font-family: 'DM Mono', monospace;
-    color: var(--gris);
-    transition: all 0.15s;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-  }
-  .refresh-btn:hover { border-color: var(--negro); color: var(--negro); }
+/* Vacio */
+.vacio { text-align: center; padding: 3rem; color: var(--muted); font-size: 0.75rem; }
+.vacio-kanji { font-family: 'Noto Serif JP', serif; font-size: 2.5rem; display: block; margin-bottom: 0.5rem; opacity: 0.1; }
 
-  @media (max-width: 768px) {
-    .stats { grid-template-columns: repeat(2, 1fr); }
-    .content { padding: 1rem; }
-    table { font-size: 0.72rem; }
-    th, td { padding: 0.6rem 0.7rem; }
-  }
+/* Gerente — tabla sucursales */
+.sucursales-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1px; background: var(--borde); margin-bottom: 1.5rem; }
+.sucursal-card { background: var(--carbon); padding: 1.2rem 1.5rem; }
+.sc-nombre { font-size: 0.65rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.5rem; }
+.sc-stats { display: flex; gap: 1.5rem; }
+.sc-stat { display: flex; flex-direction: column; gap: 0.1rem; }
+.sc-num { font-family: 'Noto Serif JP', serif; font-size: 1.6rem; line-height: 1; }
+.sc-lbl { font-size: 0.55rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+/* Alerta sonido */
+.alerta-banner {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 999;
+  background: var(--rojo); color: var(--blanco);
+  padding: 0.7rem 1.5rem; font-size: 0.8rem; letter-spacing: 0.05em;
+  display: none; align-items: center; justify-content: space-between;
+  animation: slideDown 0.3s ease;
+}
+@keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }
+.alerta-close { background: none; border: none; color: var(--blanco); cursor: pointer; font-size: 1.2rem; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--negro); }
+::-webkit-scrollbar-thumb { background: var(--borde); }
+
+@media (max-width: 768px) {
+  .stats-bar { grid-template-columns: repeat(2, 1fr); }
+  .content { padding: 0.8rem; }
+  th, td { padding: 0.5rem 0.6rem; }
+}
 </style>
 </head>
 <body>
 
-<header>
-  <div class="header-brand">
-    <span class="header-kanji">食</span>
-    <div>
-      <div style="font-size:0.9rem;font-weight:500;letter-spacing:0.05em">Panel de Control</div>
-      <div class="header-title">Restaurante Japonés · Agente WhatsApp</div>
+<!-- ALERTA SONIDO -->
+<div class="alerta-banner" id="alerta-banner">
+  <span id="alerta-texto">🍣 Nuevo pedido recibido</span>
+  <button class="alerta-close" onclick="cerrarAlerta()">×</button>
+</div>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-box">
+    <span class="login-kanji">食</span>
+    <div class="login-title">Mr. Sushi · Sistema de Pedidos</div>
+    <div class="login-sub">Iniciar sesión</div>
+    <label class="login-label">Usuario</label>
+    <input class="login-input" id="inp-usuario" type="text" placeholder="sucursal o gerente" autocomplete="username">
+    <label class="login-label">Contraseña</label>
+    <input class="login-input" id="inp-password" type="password" placeholder="••••••••" autocomplete="current-password">
+    <button class="login-btn" onclick="login()">Entrar</button>
+    <div class="login-error" id="login-error"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <div class="alerta-banner" id="alerta-banner">
+    <span id="alerta-texto">🍣 Nuevo pedido recibido</span>
+    <button class="alerta-close" onclick="cerrarAlerta()">×</button>
+  </div>
+
+  <div class="header">
+    <div class="header-left">
+      <span class="header-kanji">食</span>
+      <div class="header-info">
+        <span class="header-name">Mr. Sushi · Panel de Control</span>
+        <span class="header-sucursal" id="header-sucursal">—</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <span class="header-time" id="reloj"></span>
+      <button class="logout-btn" onclick="logout()">Salir</button>
     </div>
   </div>
-  <div class="header-time" id="reloj"></div>
-</header>
 
-<div class="stats">
-  <div class="stat">
-    <div class="stat-num rojo" id="stat-total">0</div>
-    <div class="stat-label">Pedidos hoy</div>
+  <div class="tabs">
+    <button class="tab active" id="tab-pedidos" onclick="cambiarTab('pedidos')">Pedidos</button>
+    <button class="tab" id="tab-reservaciones" onclick="cambiarTab('reservaciones')">Reservaciones</button>
+    <button class="tab" id="tab-gerente" onclick="cambiarTab('gerente')" style="display:none">Vista Gerente</button>
+    <button class="refresh-btn" onclick="cargarDatos()">↻ Actualizar</button>
   </div>
-  <div class="stat">
-    <div class="stat-num naranja" id="stat-pendientes">0</div>
-    <div class="stat-label">Pendientes</div>
-  </div>
-  <div class="stat">
-    <div class="stat-num azul" id="stat-proceso">0</div>
-    <div class="stat-label">En proceso</div>
-  </div>
-  <div class="stat">
-    <div class="stat-num verde" id="stat-listos">0</div>
-    <div class="stat-label">Completados</div>
-  </div>
-</div>
 
-<div class="tabs">
-  <button class="tab active" onclick="cambiarTab('pedidos', this)">Pedidos</button>
-  <button class="tab" onclick="cambiarTab('reservaciones', this)">Reservaciones</button>
-  <button class="refresh-btn" onclick="cargarDatos()">↻ Actualizar</button>
-</div>
-
-<!-- PANEL PEDIDOS -->
-<div class="content panel active" id="panel-pedidos">
-  <div class="filtros">
-    <button class="filtro-btn active" onclick="filtrar('todos', this)">Todos</button>
-    <button class="filtro-btn" onclick="filtrar('pendiente', this)">Pendientes</button>
-    <button class="filtro-btn" onclick="filtrar('en_proceso', this)">En proceso</button>
-    <button class="filtro-btn" onclick="filtrar('listo', this)">Listos</button>
-    <button class="filtro-btn" onclick="filtrar('cancelado', this)">Cancelados</button>
+  <div class="stats-bar">
+    <div class="stat-item"><div class="stat-num c-rojo" id="s-total">0</div><div class="stat-label">Pedidos hoy</div></div>
+    <div class="stat-item"><div class="stat-num c-naranja" id="s-pendientes">0</div><div class="stat-label">Pendientes</div></div>
+    <div class="stat-item"><div class="stat-num c-azul" id="s-proceso">0</div><div class="stat-label">En proceso</div></div>
+    <div class="stat-item"><div class="stat-num c-verde" id="s-listos">0</div><div class="stat-label">Completados</div></div>
   </div>
-  <div class="tabla-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>ID / Hora</th>
-          <th>Cliente</th>
-          <th>Pedido</th>
-          <th>Sucursal</th>
-          <th>Total</th>
-          <th>Estado</th>
-          <th>Acciones</th>
-        </tr>
-      </thead>
-      <tbody id="tbody-pedidos">
-        <tr><td colspan="7" class="vacio"><span class="vacio-kanji">待</span>Cargando pedidos...</td></tr>
-      </tbody>
-    </table>
-  </div>
-</div>
 
-<!-- PANEL RESERVACIONES -->
-<div class="content panel" id="panel-reservaciones">
-  <div class="tabla-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Nombre</th>
-          <th>Teléfono</th>
-          <th>Fecha / Hora</th>
-          <th>Personas</th>
-          <th>Sucursal</th>
-          <th>Estado</th>
-          <th>Acciones</th>
-        </tr>
-      </thead>
-      <tbody id="tbody-reservaciones">
-        <tr><td colspan="8" class="vacio"><span class="vacio-kanji">待</span>Cargando reservaciones...</td></tr>
-      </tbody>
-    </table>
+  <div class="content">
+    <!-- PEDIDOS -->
+    <div class="panel active" id="panel-pedidos">
+      <div class="filtros">
+        <button class="filtro-btn active" onclick="filtrar('todos',this)">Todos</button>
+        <button class="filtro-btn" onclick="filtrar('pendiente',this)">Pendientes</button>
+        <button class="filtro-btn" onclick="filtrar('en_proceso',this)">En proceso</button>
+        <button class="filtro-btn" onclick="filtrar('listo',this)">Listos</button>
+        <button class="filtro-btn" onclick="filtrar('cancelado',this)">Cancelados</button>
+      </div>
+      <div class="tabla-wrap">
+        <table>
+          <thead><tr>
+            <th>ID / Hora</th><th>Cliente</th><th>Pedido</th>
+            <th>Sucursal</th><th>Total</th><th>Estado</th><th>Acciones</th>
+          </tr></thead>
+          <tbody id="tbody-pedidos"><tr><td colspan="7" class="vacio"><span class="vacio-kanji">待</span>Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- RESERVACIONES -->
+    <div class="panel" id="panel-reservaciones">
+      <div class="tabla-wrap">
+        <table>
+          <thead><tr>
+            <th>ID</th><th>Nombre</th><th>Teléfono</th>
+            <th>Fecha / Hora</th><th>Personas</th><th>Sucursal</th><th>Estado</th><th>Acciones</th>
+          </tr></thead>
+          <tbody id="tbody-reservaciones"><tr><td colspan="8" class="vacio"><span class="vacio-kanji">待</span>Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- GERENTE -->
+    <div class="panel" id="panel-gerente">
+      <div class="sucursales-grid" id="sucursales-grid"></div>
+      <div class="tabla-wrap">
+        <table>
+          <thead><tr>
+            <th>ID / Hora</th><th>Cliente</th><th>Pedido</th>
+            <th>Sucursal</th><th>Total</th><th>Estado</th><th>Acciones</th>
+          </tr></thead>
+          <tbody id="tbody-gerente"><tr><td colspan="7" class="vacio"><span class="vacio-kanji">待</span>Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </div>
 
 <script>
+// ── Estado ──
+let sesion = null;
 let todosLosPedidos = [];
 let filtroActual = 'todos';
+let ultimoConteo = 0;
 
-// Reloj
-function actualizarReloj() {
-  const ahora = new Date();
+// ── Reloj ──
+setInterval(() => {
   document.getElementById('reloj').textContent =
-    ahora.toLocaleString('es-MX', { weekday:'short', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', second:'2-digit' });
-}
-setInterval(actualizarReloj, 1000);
-actualizarReloj();
+    new Date().toLocaleString('es-MX', { weekday:'short', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}, 1000);
 
-// Cargar datos
+// ── Login ──
+document.getElementById('inp-password').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+
+async function login() {
+  const usuario  = document.getElementById('inp-usuario').value.trim();
+  const password = document.getElementById('inp-password').value;
+  document.getElementById('login-error').textContent = '';
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuario, password })
+    });
+    const data = await r.json();
+    if (!r.ok) { document.getElementById('login-error').textContent = data.error; return; }
+    sesion = data;
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+    document.getElementById('header-sucursal').textContent = sesion.rol === 'gerente' ? 'Gerente General' : sesion.sucursal;
+    if (sesion.rol === 'gerente') {
+      document.getElementById('tab-gerente').style.display = 'inline-block';
+    }
+    cargarDatos();
+    setInterval(cargarDatos, 30000);
+  } catch { document.getElementById('login-error').textContent = 'Error de conexión'; }
+}
+
+function logout() {
+  sesion = null;
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('inp-password').value = '';
+}
+
+// ── Cargar datos ──
 async function cargarDatos() {
+  if (!sesion) return;
   await Promise.all([cargarPedidos(), cargarReservaciones()]);
+  if (sesion.rol === 'gerente') cargarStats();
 }
 
 async function cargarPedidos() {
   try {
-    const r = await fetch('/api/pedidos');
-    todosLosPedidos = await r.json();
-    renderPedidos(todosLosPedidos);
-    actualizarStats(todosLosPedidos);
-  } catch {
-    document.getElementById('tbody-pedidos').innerHTML =
-      '<tr><td colspan="7" class="vacio"><span class="vacio-kanji">空</span>No hay datos aún. Inicia el agente y realiza un pedido de prueba.</td></tr>';
-  }
+    const params = new URLSearchParams({ sucursal: sesion.sucursal || '', rol: sesion.rol });
+    const r = await fetch('/api/pedidos?' + params);
+    const pedidos = await r.json();
+
+    // Alerta sonido si hay nuevos pedidos pendientes
+    const pendientesNuevos = pedidos.filter(p => p.estado === 'pendiente').length;
+    if (pendientesNuevos > ultimoConteo && ultimoConteo > 0) {
+      mostrarAlerta(`🍣 Nuevo pedido en ${sesion.sucursal || 'sucursal'}`);
+      reproducirSonido();
+    }
+    ultimoConteo = pendientesNuevos;
+
+    todosLosPedidos = pedidos;
+    renderPedidos(pedidos);
+    actualizarStats(pedidos);
+  } catch { }
 }
 
 async function cargarReservaciones() {
   try {
-    const r = await fetch('/api/reservaciones');
+    const params = new URLSearchParams({ sucursal: sesion.sucursal || '', rol: sesion.rol });
+    const r = await fetch('/api/reservaciones?' + params);
     const reservaciones = await r.json();
     renderReservaciones(reservaciones);
-  } catch {
-    document.getElementById('tbody-reservaciones').innerHTML =
-      '<tr><td colspan="8" class="vacio"><span class="vacio-kanji">空</span>Sin reservaciones aún.</td></tr>';
-  }
+  } catch { }
 }
 
+async function cargarStats() {
+  try {
+    const r = await fetch('/api/stats');
+    const stats = await r.json();
+    const grid = document.getElementById('sucursales-grid');
+    grid.innerHTML = stats.map(s => `
+      <div class="sucursal-card">
+        <div class="sc-nombre">${s.sucursal}</div>
+        <div class="sc-stats">
+          <div class="sc-stat"><div class="sc-num" style="color:var(--rojo)">${s.hoy}</div><div class="sc-lbl">Hoy</div></div>
+          <div class="sc-stat"><div class="sc-num" style="color:var(--naranja)">${s.pendientes}</div><div class="sc-lbl">Pendientes</div></div>
+          <div class="sc-stat"><div class="sc-num" style="color:var(--muted)">${s.total}</div><div class="sc-lbl">Total</div></div>
+        </div>
+      </div>
+    `).join('');
+
+    // Tabla gerente
+    renderTablaGerente(todosLosPedidos);
+  } catch { }
+}
+
+// ── Render ──
 function actualizarStats(pedidos) {
   const hoy = new Date().toDateString();
-  const pedidosHoy = pedidos.filter(p => new Date(p.fecha).toDateString() === hoy);
-  document.getElementById('stat-total').textContent = pedidosHoy.length;
-  document.getElementById('stat-pendientes').textContent = pedidosHoy.filter(p => p.estado === 'pendiente').length;
-  document.getElementById('stat-proceso').textContent = pedidosHoy.filter(p => p.estado === 'en_proceso').length;
-  document.getElementById('stat-listos').textContent = pedidosHoy.filter(p => p.estado === 'listo').length;
+  const ph = pedidos.filter(p => new Date(p.fecha).toDateString() === hoy);
+  document.getElementById('s-total').textContent      = ph.length;
+  document.getElementById('s-pendientes').textContent = ph.filter(p => p.estado === 'pendiente').length;
+  document.getElementById('s-proceso').textContent    = ph.filter(p => p.estado === 'en_proceso').length;
+  document.getElementById('s-listos').textContent     = ph.filter(p => p.estado === 'listo').length;
 }
 
 function renderPedidos(pedidos) {
   const filtrados = filtroActual === 'todos' ? pedidos : pedidos.filter(p => p.estado === filtroActual);
   const tbody = document.getElementById('tbody-pedidos');
-  if (!filtrados.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="vacio"><span class="vacio-kanji">空</span>No hay pedidos con este filtro.</td></tr>';
-    return;
-  }
-  tbody.innerHTML = filtrados.map(p => {
-    const items = Array.isArray(p.items)
-      ? p.items.map(i => `${i.cantidad || 1}× ${i.nombre}`).join(', ')
-      : (p.items || '—');
-    const total = Array.isArray(p.items)
-      ? p.items.reduce((s, i) => s + (i.precio || 0) * (i.cantidad || 1), 0)
-      : '—';
-    const hora = new Date(p.fecha).toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit' });
-    return `
-    <tr>
-      <td><div class="id-cell">${p.id}</div><div style="font-size:0.7rem;color:var(--gris);margin-top:2px">${hora}</div></td>
-      <td>${p.telefono_cliente || '—'}</td>
-      <td><div>${items}</div></td>
-      <td>${p.sucursal || '—'}</td>
-      <td class="total">${total !== '—' ? '$' + total + ' MXN' : '—'}</td>
-      <td><span class="badge ${p.estado}">${p.estado.replace('_', ' ')}</span></td>
-      <td>
-        <div class="acciones">
-          ${p.estado === 'pendiente' ? `<button class="btn-accion azul" onclick="cambiarEstado('pedido','${p.id}','en_proceso')">En proceso</button>` : ''}
-          ${p.estado !== 'listo' && p.estado !== 'cancelado' ? `<button class="btn-accion verde" onclick="cambiarEstado('pedido','${p.id}','listo')">Listo</button>` : ''}
-          ${p.estado !== 'cancelado' ? `<button class="btn-accion rojo" onclick="cambiarEstado('pedido','${p.id}','cancelado')">Cancelar</button>` : ''}
-        </div>
-      </td>
-    </tr>`;
-  }).join('');
+  if (!filtrados.length) { tbody.innerHTML = '<tr><td colspan="7" class="vacio"><span class="vacio-kanji">空</span>Sin pedidos.</td></tr>'; return; }
+  tbody.innerHTML = filtrados.map(p => filaP(p)).join('');
+}
+
+function renderTablaGerente(pedidos) {
+  const tbody = document.getElementById('tbody-gerente');
+  if (!pedidos.length) { tbody.innerHTML = '<tr><td colspan="7" class="vacio"><span class="vacio-kanji">空</span>Sin pedidos.</td></tr>'; return; }
+  tbody.innerHTML = pedidos.map(p => filaP(p, true)).join('');
+}
+
+function filaP(p, esGerente) {
+  const items = Array.isArray(p.items) ? p.items.map(i => `${i.cantidad||1}× ${i.nombre}`).join(', ') : (p.items||'—');
+  const total = Array.isArray(p.items) ? p.items.reduce((s,i) => s+(i.precio||0)*(i.cantidad||1),0) : '—';
+  const hora  = new Date(p.fecha).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+  const acciones = (esGerente || sesion?.rol === 'gerente') ? `
+    ${p.estado==='pendiente'  ? `<button class="btn-accion azul"  onclick="cambiarEstado('pedido','${p.id}','en_proceso')">Proceso</button>` : ''}
+    ${p.estado!=='listo'&&p.estado!=='cancelado' ? `<button class="btn-accion verde" onclick="cambiarEstado('pedido','${p.id}','listo')">Listo</button>` : ''}
+    ${p.estado!=='cancelado'  ? `<button class="btn-accion rojo"  onclick="cambiarEstado('pedido','${p.id}','cancelado')">Cancelar</button>` : ''}
+  ` : `<span style="color:var(--muted);font-size:0.6rem">Solo lectura</span>`;
+  return `<tr>
+    <td><div class="id-cell">${p.id}</div><div class="hora-cell">${hora}</div></td>
+    <td>${(p.telefono_cliente||'—').replace('whatsapp:','')}</td>
+    <td>${items}</td>
+    <td>${p.sucursal||'—'}</td>
+    <td class="total">${total!=='—'?'$'+total+' MXN':'—'}</td>
+    <td><span class="badge ${p.estado}">${p.estado.replace('_',' ')}</span></td>
+    <td><div class="acciones">${acciones}</div></td>
+  </tr>`;
 }
 
 function renderReservaciones(reservaciones) {
   const tbody = document.getElementById('tbody-reservaciones');
-  if (!reservaciones.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="vacio"><span class="vacio-kanji">空</span>Sin reservaciones aún.</td></tr>';
-    return;
-  }
-  tbody.innerHTML = reservaciones.map(r => `
-    <tr>
-      <td class="id-cell">${r.id}</td>
-      <td>${r.nombre || '—'}</td>
-      <td>${r.telefono_cliente || '—'}</td>
-      <td>${r.fecha || '—'} ${r.hora || ''}</td>
-      <td>${r.personas || '—'}</td>
-      <td>${r.sucursal || '—'}</td>
-      <td><span class="badge ${r.estado}">${r.estado}</span></td>
-      <td>
-        <div class="acciones">
-          ${r.estado !== 'cancelada' ? `<button class="btn-accion rojo" onclick="cambiarEstado('reservacion','${r.id}','cancelada')">Cancelar</button>` : ''}
-        </div>
-      </td>
-    </tr>`).join('');
+  if (!reservaciones.length) { tbody.innerHTML = '<tr><td colspan="8" class="vacio"><span class="vacio-kanji">空</span>Sin reservaciones.</td></tr>'; return; }
+  tbody.innerHTML = reservaciones.map(r => `<tr>
+    <td class="id-cell">${r.id}</td>
+    <td>${r.nombre||'—'}</td>
+    <td>${(r.telefono_cliente||'—').replace('whatsapp:','')}</td>
+    <td>${r.fecha||'—'} ${r.hora||''}</td>
+    <td>${r.personas||'—'}</td>
+    <td>${r.sucursal||'—'}</td>
+    <td><span class="badge ${r.estado}">${r.estado}</span></td>
+    <td><div class="acciones">
+      ${r.estado!=='cancelada'&&sesion?.rol==='gerente'?`<button class="btn-accion rojo" onclick="cambiarEstado('reservacion','${r.id}','cancelada')">Cancelar</button>`:''}
+    </div></td>
+  </tr>`).join('');
 }
 
+// ── Acciones ──
 async function cambiarEstado(tipo, id, estado) {
-  const url = tipo === 'pedido' ? `/api/pedidos/${id}/estado` : `/api/reservaciones/${id}/estado`;
-  await fetch(url, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ estado })
-  });
+  const url = tipo==='pedido' ? `/api/pedidos/${id}/estado` : `/api/reservaciones/${id}/estado`;
+  await fetch(url, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({estado}) });
   cargarDatos();
 }
 
@@ -460,16 +521,42 @@ function filtrar(estado, btn) {
   renderPedidos(todosLosPedidos);
 }
 
-function cambiarTab(tab, btn) {
+function cambiarTab(tab) {
   document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById('panel-' + tab).classList.add('active');
+  document.getElementById('tab-'+tab).classList.add('active');
+  document.getElementById('panel-'+tab).classList.add('active');
+  if (tab==='gerente') cargarStats();
 }
 
-// Auto-actualizar cada 30 segundos
-setInterval(cargarDatos, 30000);
-cargarDatos();
+// ── Alerta sonido ──
+function reproducirSonido() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [523, 659, 784].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.3, ctx.currentTime + i*0.15);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i*0.15 + 0.3);
+      osc.start(ctx.currentTime + i*0.15);
+      osc.stop(ctx.currentTime + i*0.15 + 0.3);
+    });
+  } catch(e) {}
+}
+
+function mostrarAlerta(texto) {
+  const banner = document.getElementById('alerta-banner');
+  document.getElementById('alerta-texto').textContent = texto;
+  banner.style.display = 'flex';
+  setTimeout(cerrarAlerta, 8000);
+}
+
+function cerrarAlerta() {
+  document.getElementById('alerta-banner').style.display = 'none';
+}
 </script>
 </body>
 </html>

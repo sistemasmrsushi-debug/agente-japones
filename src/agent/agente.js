@@ -1,7 +1,17 @@
+// src/agent/agente.js
+// =============================================
+// CEREBRO DEL AGENTE IA — Groq (gratis)
+// Inicialización lazy (no falla si falta la key al arrancar)
+// =============================================
+
 const restaurante = require("../../config/restaurante");
 const logger = require("../utils/logger");
 
+// Inicialización lazy — solo cuando se necesita
 function getGroq() {
+  if (!process.env.GROQ_API_KEY || process.env.GROQ_API_KEY.trim() === "") {
+    throw new Error("Configura GROQ_API_KEY en tus variables de entorno");
+  }
   const Groq = require("groq-sdk");
   return new Groq({ apiKey: process.env.GROQ_API_KEY });
 }
@@ -76,12 +86,12 @@ async function procesarMensaje(historial, mensajeNuevo) {
       datos: accion ? accion.datos : null,
       historialActualizado: [
         ...historial,
-        { role: "user", content: mensajeNuevo },
+        { role: "user",      content: mensajeNuevo },
         { role: "assistant", content: textoRespuesta },
       ],
     };
   } catch (error) {
-    logger.error("Error en agente Groq: " + error.message + " - " + error.stack);
+    logger.error("Error en agente Groq:", error.message);
     throw error;
   }
 }
@@ -92,9 +102,9 @@ function detectarAccion(texto) {
     if (!jsonMatch) return null;
     const datos = JSON.parse(jsonMatch[0]);
     const mensajesCliente = {
-      REGISTRAR_PEDIDO: generarConfirmacionPedido(datos.pedido),
+      REGISTRAR_PEDIDO:      generarConfirmacionPedido(datos.pedido),
       REGISTRAR_RESERVACION: generarConfirmacionReservacion(datos.reservacion),
-      ESCALAR_HUMANO: `Entiendo tu situación. Un gerente se comunicará contigo en menos de 30 minutos. ¡Gracias por tu paciencia! 🙏`,
+      ESCALAR_HUMANO:        `Entiendo tu situación. Un gerente se comunicará contigo en menos de 30 minutos. ¡Gracias por tu paciencia! 🙏`,
     };
     return {
       tipo: datos.accion,
