@@ -1,36 +1,43 @@
-// config/restaurante.js
-// =============================================
-// CONFIGURACIÓN CENTRAL DEL RESTAURANTE
-// Edita este archivo con tu información real
-// =============================================
 
 module.exports = {
-  nombre: "Restaurante Japonés",
-  horario: "Lunes a Domingo de 12:00 a 22:00",
-  telefono_principal: "+52 55 XXXX XXXX",
+  nombre: "Mr. Sushi",
+  horario: "Lunes a Sábado de 12:00 a 22:00 · Domingos de 13:00 a 21:00",
 
-  // -----------------------------------------------
-  // SUCURSALES (agrega o quita según necesites)
-  // -----------------------------------------------
+
   sucursales: [
-    { id: 1, nombre: "Polanco",         zona: "CDMX",   direccion: "Av. Presidente Masaryk 123",   telefono: "+52 55 1111 0001" },
-    { id: 2, nombre: "Santa Fe",        zona: "CDMX",   direccion: "Centro Comercial Santa Fe L4", telefono: "+52 55 1111 0002" },
-    { id: 3, nombre: "Condesa",         zona: "CDMX",   direccion: "Av. Ámsterdam 45",             telefono: "+52 55 1111 0003" },
-    { id: 4, nombre: "Interlomas",      zona: "EDOMEX", direccion: "Mall Interlomas Local 210",    telefono: "+52 55 1111 0004" },
-    { id: 5, nombre: "Satélite",        zona: "EDOMEX", direccion: "Plaza Satélite Nivel 2",       telefono: "+52 55 1111 0005" },
-    { id: 6, nombre: "Metepec",         zona: "EDOMEX", direccion: "Av. Tecnológico 890",          telefono: "+52 55 1111 0006" },
-    // ... agrega las 30 sucursales aquí
+    { id: 1, nombre: "Mr. Sushi Masaryk",              zona: "CDMX",   direccion: "Av. Pdte. Masaryk 354, Polanco, Polanco III Secc, Miguel Hidalgo, 11560 Ciudad de México, CDMX",   telefono: "+52 55 1111 0001" },
+    { id: 2, nombre: "Mr. Sushi Cc Santa Fe",          zona: "CDMX",   direccion: "Vasco de Quiroga 3800, Lomas de Santa Fe, Contadero, Cuajimalpa de Morelos, 05109 Ciudad de México, CDMX", telefono: "+52 55 1111 0002" },
+    { id: 3, nombre: "Mr. Sushi Patriotismo",          zona: "CDMX",   direccion: "Av. Patriotismo 229, San Pedro de los Pinos, Benito Juárez, 03800 Ciudad de México, CDMX",             telefono: "+52 55 1111 0003" },
+    { id: 4, nombre: "Mr. Sushi Perisur",              zona: "CDMXX",  direccion: "Anillo Perif. Blvd. Adolfo López Mateos 4690, Insurgentes Cuicuilco, Coyoacán, 04530 Ciudad de México, CDMX210",    telefono: "+52 55 1111 0004" },
+    { id: 5, nombre: "Mr. Sushi Coapa",                zona: "CDMX",   direccion: "Calz. del Hueso 519-loc 417, Coapa, Residencial Miramontes, Tlalpan, 14300 Ciudad de México, CDMX",       telefono: "+52 55 1111 0005" },
+    { id: 6, nombre: "Mr. Sushi Toluca",               zona: "EDOMEX", direccion: "Av. Primero de Mayo 1700-402, Santa Ana Tlapaltitlán, 50071 Santa Ana Tlapaltitlán, Méx.",          telefono: "+52 55 1111 0006" },
+    { id: 7, nombre: "Mr. Sushi Americana",            zona: "JALICO", direccion: "C. Miguel Lerdo de Tejada 2031, Col Americana, Obrera, 44560 Guadalajara, Jal.",          telefono: "+52 55 1111 0006" },
+    { id: 8, nombre: "Mr. Sushi Arboledas",            zona: "EDOMEX", direccion: "Av. Tecnológico 890Calz. de los Jinetes 60-Locales 3 y 7, Las Arboledas, 54026 Tlalnepantla, Méx.",          telefono: "+52 55 1111 0006" },
+    { id: 9, nombre: "Mr. Sushi Galerias Atizapan",    zona: "EDOMEX", direccion: "Av. Tecnológico 890",          telefono: "+52 55 1111 0006" },
+    { id: 10, nombre: "Mr. Sushi Zona Esmeralda",      zona: "EDOMEX", direccion: "Av. Tecnológico 890",          telefono: "+52 55 1111 0006" },
+    { id: 11, nombre: "Mr. Sushi Zona Azul Rest",      zona: "EDOMEX", direccion: "Av. Tecnológico 890",          telefono: "+52 55 1111 0006" },
+    { id: 12, nombre: "Mr. Sushi Metepec",             zona: "EDOMEX", direccion: "Av. Tecnológico 890",          telefono: "+52 55 1111 0006" },
+    { id: 13, nombre: "Mr. Sushi Fuentes de Satelite", zona: "EDOMEX", direccion: "Av. Tecnológico 890",          telefono: "+52 55 1111 0006" },
+    { id: 14, nombre: "Hahha Satelite",                zona: "EDOMEX", direccion: "Av. Tecnológico 890",          telefono: "+52 55 1111 0006" },
+    { id: 15, nombre: "Hahha Esmeralda",               zona: "EDOMEX", direccion: "Av. Tecnológico 890",          telefono: "+52 55 1111 0006" },
+    { id: 16, nombre: "Mr. Sushi Zona Azul Dom.",      zona: "EDOMEX", direccion: "Av. Tecnológico 890",          telefono: "+52 55 1111 0006" },
+    { id: 17, nombre: "Mr. Sushi Delta",               zona: "CDMXX",  direccion: "Av. Tecnológico 890",          telefono: "+52 55 1111 0006" },
+    { id: 18, nombre: "Mr. Sushi Serdan",              zona: "EDOMEX", direccion: "Av. Tecnológico 890",          telefono: "+52 55 1111 0006" },
+    { id: 19, nombre: "Mr. Sushi Cuernavaca",          zona: "EDOMEX", direccion: "Av. Tecnológico 890",          telefono: "+52 55 1111 0006" },
+    { id: 20, nombre: "Mr. Sushi Vallejo",             zona: "EDOMEX", direccion: "Av. Tecnológico 890",          telefono: "+52 55 1111 0006" },
+    { id: 21, nombre: "Mr. Sushi Mundo E",             zona: "EDOMEX", direccion: "Av. Tecnológico 890",          telefono: "+52 55 1111 0006" },
+    { id: 22, nombre: "Mr. Sushi Lomas Verdes",        zona: "EDOMEX", direccion: "Av. Tecnológico 890",          telefono: "+52 55 1111 0006" },
+    { id: 23, nombre: "Mr. Sushi Tecamachalco",        zona: "EDOMEX", direccion: "Av. Tecnológico 890",          telefono: "+52 55 1111 0006" },
+  
   ],
 
-  // -----------------------------------------------
-  // MENÚ (actualiza precios y platillos reales)
-  // -----------------------------------------------
+
   menu: {
     "Entradas": [
-      { nombre: "Edamame",          precio: 85,   descripcion: "Frijoles de soya al vapor con sal de mar" },
-      { nombre: "Gyozas (6 pzas)",  precio: 120,  descripcion: "Dumplings de cerdo y verduras, fritos o al vapor" },
-      { nombre: "Takoyaki (8 pzas)",precio: 130,  descripcion: "Bolitas de pulpo con salsa takoyaki y mayonesa" },
-      { nombre: "Miso Soup",        precio: 70,   descripcion: "Sopa de miso con tofu y alga wakame" },
+      { nombre: "Edamame",              precio: 85,   descripcion: "Frijoles de soya al vapor con sal de mar" },
+      { nombre: "Gyozas",               precio: 120,  descripcion: "Dumplings de cerdo y verduras, fritos o al vapor" },
+      { nombre: "Chiles Tempura",       precio: 130,  descripcion: "Bolitas de pulpo con salsa takoyaki y mayonesa" },
+      { nombre: "Edamames Spicy",       precio: 70,   descripcion: "Sopa de miso con tofu y alga wakame" },
     ],
     "Sushi Rolls": [
       { nombre: "California Roll",  precio: 160,  descripcion: "Cangrejo, aguacate y pepino (8 pzas)" },
@@ -51,9 +58,6 @@ module.exports = {
       { nombre: "Bento Box",        precio: 250,  descripcion: "Arroz, salmón teriyaki, gyozas, ensalada y miso" },
     ],
     "Bebidas": [
-      { nombre: "Matcha Latte",     precio: 75,   descripcion: "Té verde japonés con leche vaporizada" },
-      { nombre: "Limonada de Yuzu", precio: 80,   descripcion: "Cítrico japonés, miel y agua mineral" },
-      { nombre: "Sake (copa)",      precio: 120,  descripcion: "Sake frío de la casa" },
       { nombre: "Agua / Refresco",  precio: 40,   descripcion: "Agua natural, mineral o refresco" },
     ],
     "Postres": [
