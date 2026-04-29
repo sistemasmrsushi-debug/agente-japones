@@ -10,6 +10,7 @@ const NodeCache = require("node-cache");
 const fs = require("fs");
 const path = require("path");
 const https = require("https");
+const http = require("http");
 const { procesarMensaje } = require("../agent/agente");
 const logger = require("../utils/logger");
 
@@ -33,7 +34,7 @@ function getDeepgram() {
 }
 
 // -----------------------------------------------
-// 1. TWILIO LLAMA AQUÍ CUANDO ALGUIEN MARCA
+// 1. LLAMADA ENTRANTE
 // -----------------------------------------------
 router.post("/llamada/entrante", (req, res) => {
   const telefono = req.body.From || "desconocido";
@@ -64,12 +65,14 @@ router.post("/llamada/entrante", (req, res) => {
 });
 
 // -----------------------------------------------
-// 2. TWILIO MANDA EL AUDIO GRABADO
+// 2. PROCESAR AUDIO GRABADO
 // -----------------------------------------------
 router.post("/llamada/respuesta", async (req, res) => {
   const telefono = req.body.From || "desconocido";
   const recordingUrl = req.body.RecordingUrl;
   const callSid = req.body.CallSid;
+
+  logger.info(`Audio recibido de ${telefono}: ${recordingUrl}`);
 
   let twiml;
   try {
@@ -80,8 +83,13 @@ router.post("/llamada/respuesta", async (req, res) => {
   }
 
   try {
-    const textoCliente = await transcribirAudio(recordingUrl);
-    logger.info(`[${telefono}] Transcripción: ${textoCliente}`);
+    // Descargar audio con autenticación de Twilio
+    const audioBuffer = await descargarAudioTwilio(recordingUrl + ".mp3");
+    logger.info(`Audio descargado: ${audioBuffer.length} bytes`);
+
+    // Transcribir con Deepgram
+    const textoCliente = await transcribirBuffer(audioBuffer);
+    logger.info(`[${telefono}] Transcripción: "${textoCliente}"`);
 
     if (!textoCliente || textoCliente.trim() === "") {
       twiml.say(
@@ -92,10 +100,12 @@ router.post("/llamada/respuesta", async (req, res) => {
       return res.type("text/xml").send(twiml.toString());
     }
 
+    // Procesar con el agente IA
     const historial = conversaciones.get(telefono) || [];
     const resultado = await procesarMensaje(historial, textoCliente);
     conversaciones.set(telefono, resultado.historialActualizado);
 
+    // Generar audio de respuesta
     const audioId = `${callSid}-${Date.now()}`;
     await generarAudioTTS(resultado.texto, audioId);
 
@@ -127,7 +137,7 @@ router.post("/llamada/respuesta", async (req, res) => {
 });
 
 // -----------------------------------------------
-// 3. SERVIR EL AUDIO TTS
+// 3. SERVIR AUDIO TTS
 // -----------------------------------------------
 router.get("/llamada/audio/:id", (req, res) => {
   const audioPath = path.join(AUDIO_DIR, `${req.params.id}.mp3`);
@@ -137,26 +147,60 @@ router.get("/llamada/audio/:id", (req, res) => {
 });
 
 // -----------------------------------------------
-// FUNCIÓN: Transcribir audio con Deepgram
-// Usa transcribeUrl para que Deepgram descargue
-// el audio directamente desde Twilio
+// DESCARGAR AUDIO CON AUTENTICACIÓN TWILIO
 // -----------------------------------------------
-async function transcribirAudio(recordingUrl) {
+function descargarAudioTwilio(url) {
+  return new Promise((resolve, reject) => {
+    const auth = Buffer.from(
+      `${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`
+    ).toString("base64");
+
+    const options = {
+      headers: {
+        "Authorization": `Basic ${auth}`,
+        "User-Agent": "Mozilla/5.0",
+      }
+    };
+
+    const client = url.startsWith("https") ? https : http;
+    client.get(url, options, (response) => {
+      // Manejar redirecciones
+      if (response.statusCode === 301 || response.statusCode === 302) {
+        const redirectUrl = response.headers.location;
+        logger.info(`Redirigiendo a: ${redirectUrl}`);
+        return descargarAudioTwilio(redirectUrl).then(resolve).catch(reject);
+      }
+
+      if (response.statusCode !== 200) {
+        return reject(new Error(`HTTP ${response.statusCode} al descargar audio`));
+      }
+
+      const chunks = [];
+      response.on("data", chunk => chunks.push(chunk));
+      response.on("end", () => resolve(Buffer.concat(chunks)));
+      response.on("error", reject);
+    }).on("error", reject);
+  });
+}
+
+// -----------------------------------------------
+// TRANSCRIBIR BUFFER CON DEEPGRAM
+// -----------------------------------------------
+async function transcribirBuffer(audioBuffer) {
   try {
     const deepgram = getDeepgram();
-    const urlConAuth = recordingUrl + ".mp3";
 
-    const { result } = await deepgram.listen.prerecorded.transcribeUrl(
-      { url: urlConAuth },
+    const { result } = await deepgram.listen.prerecorded.transcribeFile(
+      audioBuffer,
       {
         model: "nova-2",
         language: "es",
         smart_format: true,
+        mimetype: "audio/mpeg",
       }
     );
 
     const transcripcion = result?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
-    logger.info(`Deepgram transcribió: "${transcripcion}"`);
     return transcripcion;
 
   } catch (error) {
@@ -166,7 +210,7 @@ async function transcribirAudio(recordingUrl) {
 }
 
 // -----------------------------------------------
-// FUNCIÓN: Generar audio TTS con Google Translate
+// GENERAR AUDIO TTS
 // -----------------------------------------------
 async function generarAudioTTS(texto, audioId) {
   const audioPath = path.join(AUDIO_DIR, `${audioId}.mp3`);
