@@ -17,17 +17,16 @@ const conversaciones = new NodeCache({ stdTTL: 86400 });
 const AUDIO_DIR = path.join(__dirname, "../../data/audios");
 if (!fs.existsSync(AUDIO_DIR)) fs.mkdirSync(AUDIO_DIR, { recursive: true });
 
-// Inicialización lazy (solo cuando se necesita, no al arrancar)
 function getTwilio() {
   if (!process.env.TWILIO_ACCOUNT_SID || process.env.TWILIO_ACCOUNT_SID.includes("xxx")) {
-    throw new Error("Configura TWILIO_ACCOUNT_SID en tu .env");
+    throw new Error("Configura TWILIO_ACCOUNT_SID en tus variables de entorno");
   }
   return require("twilio");
 }
 
 function getDeepgram() {
   if (!process.env.DEEPGRAM_API_KEY || process.env.DEEPGRAM_API_KEY.includes("xxx")) {
-    throw new Error("Configura DEEPGRAM_API_KEY en tu .env");
+    throw new Error("Configura DEEPGRAM_API_KEY en tus variables de entorno");
   }
   const { createClient } = require("@deepgram/sdk");
   return createClient(process.env.DEEPGRAM_API_KEY);
@@ -44,8 +43,9 @@ router.post("/llamada/entrante", (req, res) => {
     const twilio = getTwilio();
     const twiml = new twilio.twiml.VoiceResponse();
 
-    twiml.say({ language: "es-MX", voice: "Polly.Mia" },
-      "Bienvenido al restaurante japonés. Por favor, diga su pedido o consulta después del tono."
+    twiml.say(
+      { language: "es-MX", voice: "Polly.Mia" },
+      "Bienvenido al restaurante Mr. Sushi. Por favor, diga su pedido o consulta después del tono."
     );
 
     twiml.record({
@@ -58,7 +58,7 @@ router.post("/llamada/entrante", (req, res) => {
 
     res.type("text/xml").send(twiml.toString());
   } catch (error) {
-    logger.error("Error en llamada entrante:", error.message);
+    logger.error("Error en llamada entrante: " + error.message);
     res.status(500).send(error.message);
   }
 });
@@ -84,7 +84,8 @@ router.post("/llamada/respuesta", async (req, res) => {
     logger.info(`[${telefono}] Transcripción: ${textoCliente}`);
 
     if (!textoCliente || textoCliente.trim() === "") {
-      twiml.say({ language: "es-MX", voice: "Polly.Mia" },
+      twiml.say(
+        { language: "es-MX", voice: "Polly.Mia" },
         "Lo siento, no pude escucharte bien. Por favor intenta de nuevo."
       );
       twiml.redirect(`${process.env.BASE_URL}/llamada/entrante`);
@@ -107,14 +108,16 @@ router.post("/llamada/respuesta", async (req, res) => {
       playBeep: true,
       timeout: 3,
     });
-    twiml.say({ language: "es-MX", voice: "Polly.Mia" },
-      "Gracias por llamar al restaurante japonés. ¡Hasta pronto!"
+    twiml.say(
+      { language: "es-MX", voice: "Polly.Mia" },
+      "Gracias por llamar a Mr. Sushi. ¡Hasta pronto!"
     );
     twiml.hangup();
 
   } catch (error) {
-    logger.error("Error procesando llamada:", error.message);
-    twiml.say({ language: "es-MX", voice: "Polly.Mia" },
+    logger.error("Error procesando llamada: " + error.message);
+    twiml.say(
+      { language: "es-MX", voice: "Polly.Mia" },
       "Lo siento, tuvimos un problema. Por favor llama de nuevo en unos minutos."
     );
     twiml.hangup();
@@ -134,38 +137,37 @@ router.get("/llamada/audio/:id", (req, res) => {
 });
 
 // -----------------------------------------------
-// FUNCIONES AUXILIARES
+// FUNCIÓN: Transcribir audio con Deepgram
+// Usa transcribeUrl para que Deepgram descargue
+// el audio directamente desde Twilio
 // -----------------------------------------------
 async function transcribirAudio(recordingUrl) {
   try {
     const deepgram = getDeepgram();
     const urlConAuth = recordingUrl + ".mp3";
-    const audioBuffer = await descargarAudio(urlConAuth);
-    const { result } = await deepgram.listen.prerecorded.transcribeFile(
-      audioBuffer,
-      { model: "nova-2", language: "es", smart_format: true }
+
+    const { result } = await deepgram.listen.prerecorded.transcribeUrl(
+      { url: urlConAuth },
+      {
+        model: "nova-2",
+        language: "es",
+        smart_format: true,
+      }
     );
-    return result?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
+
+    const transcripcion = result?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
+    logger.info(`Deepgram transcribió: "${transcripcion}"`);
+    return transcripcion;
+
   } catch (error) {
-    logger.error("Error en Deepgram:", error.message);
+    logger.error("Error en Deepgram: " + error.message);
     return "";
   }
 }
 
-function descargarAudio(url) {
-  return new Promise((resolve, reject) => {
-    const auth = Buffer.from(
-      `${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`
-    ).toString("base64");
-    https.get(url, { headers: { Authorization: `Basic ${auth}` } }, (response) => {
-      const chunks = [];
-      response.on("data", chunk => chunks.push(chunk));
-      response.on("end", () => resolve(Buffer.concat(chunks)));
-      response.on("error", reject);
-    }).on("error", reject);
-  });
-}
-
+// -----------------------------------------------
+// FUNCIÓN: Generar audio TTS con Google Translate
+// -----------------------------------------------
 async function generarAudioTTS(texto, audioId) {
   const audioPath = path.join(AUDIO_DIR, `${audioId}.mp3`);
   const textoLimpio = texto
