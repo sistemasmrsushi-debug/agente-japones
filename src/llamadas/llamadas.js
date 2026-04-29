@@ -14,7 +14,7 @@ const AUDIO_DIR = path.join(__dirname, "../../data/audios");
 if (!fs.existsSync(AUDIO_DIR)) fs.mkdirSync(AUDIO_DIR, { recursive: true });
 
 function getTwilio() {
-  return require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+  return require("twilio");
 }
 
 function getDeepgram() {
@@ -27,31 +27,28 @@ router.post("/llamada/entrante", (req, res) => {
   const telefono = req.body.From || "desconocido";
   logger.info(`Llamada entrante de: ${telefono}`);
 
-  try {
-    const client = getTwilio();
-    const VoiceResponse = require("twilio").twiml.VoiceResponse;
-    const twiml = new VoiceResponse();
+  const twilio = getTwilio();
+  const twiml = new twilio.twiml.VoiceResponse();
 
-    twiml.say({ language: "es-MX", voice: "Polly.Mia" },
-      "Bienvenido a Mr. Sushi. Por favor, diga su pedido o consulta después del tono.");
+  twiml.say(
+    { language: "es-MX", voice: "Polly.Mia" },
+    "Bienvenido a Mr. Sushi. Por favor, diga su pedido o consulta después del tono."
+  );
 
-    twiml.record({
-      action: `${process.env.BASE_URL}/llamada/respuesta`,
-      method: "POST",
-      maxLength: 30,
-      playBeep: true,
-      transcribe: false,
-      timeout: 5,
-    });
+  twiml.record({
+    action: `${process.env.BASE_URL}/llamada/respuesta`,
+    method: "POST",
+    maxLength: 30,
+    playBeep: true,
+    transcribe: false,
+    timeout: 5,
+    recordingStatusCallback: `${process.env.BASE_URL}/llamada/status`,
+  });
 
-    twiml.say({ language: "es-MX", voice: "Polly.Mia" }, "No escuché nada. Adiós.");
-    twiml.hangup();
+  twiml.say({ language: "es-MX", voice: "Polly.Mia" }, "No escuché nada. Hasta luego.");
+  twiml.hangup();
 
-    res.type("text/xml").send(twiml.toString());
-  } catch (error) {
-    logger.error("Error en llamada entrante: " + error.message);
-    res.status(500).send(error.message);
-  }
+  res.type("text/xml").send(twiml.toString());
 });
 
 // ── PROCESAR AUDIO ──
@@ -59,22 +56,26 @@ router.post("/llamada/respuesta", async (req, res) => {
   const telefono = req.body.From || "desconocido";
   const recordingUrl = req.body.RecordingUrl;
   const callSid = req.body.CallSid;
+  const recordingDuration = req.body.RecordingDuration;
 
-  logger.info(`Audio recibido de ${telefono}: ${recordingUrl}`);
+  logger.info(`Audio recibido de ${telefono} · Duración: ${recordingDuration}s · URL: ${recordingUrl}`);
 
-  const VoiceResponse = require("twilio").twiml.VoiceResponse;
-  const twiml = new VoiceResponse();
+  const twilio = getTwilio();
+  const twiml = new twilio.twiml.VoiceResponse();
 
   try {
-    const audioBuffer = await descargarAudioTwilio(recordingUrl + ".mp3");
-    logger.info(`Audio descargado: ${audioBuffer.length} bytes`);
+    // Descargar en formato WAV que es más compatible con Deepgram
+    const audioBuffer = await descargarAudioTwilio(recordingUrl + ".wav");
+    logger.info(`Audio descargado: ${audioBuffer.length} bytes (WAV)`);
 
-    const textoCliente = await transcribirBuffer(audioBuffer);
+    const textoCliente = await transcribirBuffer(audioBuffer, "audio/wav");
     logger.info(`Transcripción: "${textoCliente}"`);
 
     if (!textoCliente || textoCliente.trim() === "") {
-      twiml.say({ language: "es-MX", voice: "Polly.Mia" },
-        "Lo siento, no pude escucharte. Por favor intenta de nuevo.");
+      twiml.say(
+        { language: "es-MX", voice: "Polly.Mia" },
+        "Lo siento, no pude escucharte. Por favor intenta de nuevo."
+      );
       twiml.redirect(`${process.env.BASE_URL}/llamada/entrante`);
       return res.type("text/xml").send(twiml.toString());
     }
@@ -95,18 +96,28 @@ router.post("/llamada/respuesta", async (req, res) => {
       playBeep: true,
       timeout: 5,
     });
-    twiml.say({ language: "es-MX", voice: "Polly.Mia" },
-      "Gracias por llamar a Mr. Sushi. Hasta pronto.");
+    twiml.say(
+      { language: "es-MX", voice: "Polly.Mia" },
+      "Gracias por llamar a Mr. Sushi. Hasta pronto."
+    );
     twiml.hangup();
 
   } catch (error) {
     logger.error("Error procesando llamada: " + error.message);
-    twiml.say({ language: "es-MX", voice: "Polly.Mia" },
-      "Tuvimos un problema. Por favor llama de nuevo.");
+    twiml.say(
+      { language: "es-MX", voice: "Polly.Mia" },
+      "Tuvimos un problema. Por favor llama de nuevo."
+    );
     twiml.hangup();
   }
 
   res.type("text/xml").send(twiml.toString());
+});
+
+// ── STATUS CALLBACK ──
+router.post("/llamada/status", (req, res) => {
+  logger.info(`Recording status: ${JSON.stringify(req.body)}`);
+  res.sendStatus(200);
 });
 
 // ── SERVIR AUDIO ──
@@ -132,7 +143,7 @@ function descargarAudioTwilio(url) {
         return descargarAudioTwilio(response.headers.location).then(resolve).catch(reject);
       }
       if (response.statusCode !== 200) {
-        return reject(new Error(`HTTP ${response.statusCode}`));
+        return reject(new Error(`HTTP ${response.statusCode} al descargar audio`));
       }
       const chunks = [];
       response.on("data", chunk => chunks.push(chunk));
@@ -143,14 +154,21 @@ function descargarAudioTwilio(url) {
 }
 
 // ── TRANSCRIBIR CON DEEPGRAM ──
-async function transcribirBuffer(audioBuffer) {
+async function transcribirBuffer(audioBuffer, mimetype = "audio/wav") {
   try {
     const deepgram = getDeepgram();
     const { result } = await deepgram.listen.prerecorded.transcribeFile(
       audioBuffer,
-      { model: "nova-2", language: "es", smart_format: true, mimetype: "audio/mpeg" }
+      {
+        model: "nova-2",
+        language: "es",
+        smart_format: true,
+        mimetype,
+      }
     );
-    return result?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
+    const texto = result?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
+    logger.info(`Deepgram resultado: "${texto}"`);
+    return texto;
   } catch (error) {
     logger.error("Error Deepgram: " + error.message);
     return "";
@@ -160,7 +178,10 @@ async function transcribirBuffer(audioBuffer) {
 // ── GENERAR AUDIO TTS ──
 async function generarAudioTTS(texto, audioId) {
   const audioPath = path.join(AUDIO_DIR, `${audioId}.mp3`);
-  const textoLimpio = texto.replace(/[*_~`]/g, "").replace(/[\u{1F300}-\u{1F9FF}]/gu, "").substring(0, 500);
+  const textoLimpio = texto
+    .replace(/[*_~`]/g, "")
+    .replace(/[\u{1F300}-\u{1F9FF}]/gu, "")
+    .substring(0, 500);
   const urlTTS = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(textoLimpio)}&tl=es&client=tw-ob`;
 
   return new Promise((resolve, reject) => {
