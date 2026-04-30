@@ -1,13 +1,12 @@
 // src/agent/agente.js
 // =============================================
-// CEREBRO DEL AGENTE IA — Groq (gratis)
-// Inicialización lazy (no falla si falta la key al arrancar)
+// CEREBRO DEL AGENTE IA — Groq
+// Con soporte para pedidos a domicilio
 // =============================================
 
 const restaurante = require("../../config/restaurante");
 const logger = require("../utils/logger");
 
-// Inicialización lazy — solo cuando se necesita
 function getGroq() {
   if (!process.env.GROQ_API_KEY || process.env.GROQ_API_KEY.trim() === "") {
     throw new Error("Configura GROQ_API_KEY en tus variables de entorno");
@@ -26,7 +25,7 @@ function buildSystemPrompt() {
   const sucursalesTexto = restaurante.sucursales
     .map(s => `  - ${s.nombre} (${s.zona}): ${s.direccion}`).join("\n");
 
-  return `Eres el asistente virtual de ${restaurante.nombre}, un restaurante japonés con 30 sucursales en CDMX y Estado de México.
+  return `Eres el asistente virtual de ${restaurante.nombre}, un restaurante japonés con sucursales en CDMX y Estado de México.
 
 Tu personalidad:
 - Amable, profesional y eficiente
@@ -34,12 +33,21 @@ Tu personalidad:
 - Hablas en español mexicano natural (no robótico)
 
 Tus capacidades:
-1. TOMAR PEDIDOS: Ayuda al cliente a armar su pedido, confirma artículos y precios, solicita sucursal.
+1. TOMAR PEDIDOS: Ayuda al cliente a armar su pedido, confirma artículos y precios.
+   - Pregunta siempre si el pedido es para RECOGER EN SUCURSAL o a DOMICILIO.
+   - Si es a domicilio: pide dirección completa, colonia y referencias.
+   - Si es en sucursal: pregunta en qué sucursal quiere recoger.
 2. RESERVACIONES: Recopila nombre, fecha, hora, número de personas y sucursal.
 3. CONSULTAR MENÚ: Describe platillos, precios e ingredientes.
 4. SOPORTE: Atiende quejas con empatía. Si es grave, avisa que un gerente contactará en 30 minutos.
 
 Horario: ${restaurante.horario}
+
+SERVICIO A DOMICILIO:
+- Envío GRATIS a cualquier dirección
+- Tiempo estimado de entrega: 40 minutos
+- Sin restricciones de zona
+- Al confirmar pedido a domicilio, siempre incluir la dirección completa
 
 MENÚ COMPLETO:
 ${menuTexto}
@@ -50,12 +58,15 @@ ${sucursalesTexto}
 POLÍTICAS:
 - Reservaciones: ${restaurante.politicas.reservaciones}
 - Cancelaciones: ${restaurante.politicas.cancelaciones}
-- Tiempo de espera: ${restaurante.politicas.tiempo_espera_pedido}
+- Tiempo de espera en sucursal: ${restaurante.politicas.tiempo_espera_pedido}
 
 REGLAS IMPORTANTES:
 - Nunca inventes platillos, precios o sucursales que no estén en la lista.
-- Al confirmar un pedido, repite los artículos y el total antes de registrarlo.
-- Al finalizar un pedido responde con el JSON: {"accion":"REGISTRAR_PEDIDO","pedido":{...}}
+- Al confirmar un pedido, repite los artículos, el total y la dirección o sucursal.
+- Para pedidos a DOMICILIO responde con el JSON:
+  {"accion":"REGISTRAR_PEDIDO","pedido":{"items":[...],"tipo":"domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"..."}}
+- Para pedidos en SUCURSAL responde con el JSON:
+  {"accion":"REGISTRAR_PEDIDO","pedido":{"items":[...],"tipo":"sucursal","sucursal":"..."}}
 - Al confirmar reservación responde con: {"accion":"REGISTRAR_RESERVACION","reservacion":{...}}
 - Al escalar a humano responde con: {"accion":"ESCALAR_HUMANO","motivo":"..."}
 - Si es consulta normal, responde solo con texto sin JSON.`;
@@ -91,7 +102,7 @@ async function procesarMensaje(historial, mensajeNuevo) {
       ],
     };
   } catch (error) {
-    logger.error("Error en agente Groq:", error.message);
+    logger.error("Error en agente Groq: " + error.message);
     throw error;
   }
 }
@@ -116,9 +127,15 @@ function detectarAccion(texto) {
 
 function generarConfirmacionPedido(pedido) {
   if (!pedido || !pedido.items) return "¡Tu pedido ha sido registrado! En breve te confirmamos.";
+
   const lista = pedido.items.map(i => `• ${i.cantidad}x ${i.nombre} - $${i.precio * i.cantidad}`).join("\n");
   const total = pedido.items.reduce((sum, i) => sum + i.precio * i.cantidad, 0);
-  return `✅ ¡Pedido confirmado!\n\n${lista}\n\nTotal: $${total} MXN\nTiempo: ${restaurante.politicas.tiempo_espera_pedido}\nSucursal: ${pedido.sucursal || "Por confirmar"}\n\n¡Gracias! 🍣`;
+
+  if (pedido.tipo === "domicilio") {
+    return `✅ ¡Pedido a domicilio confirmado!\n\n${lista}\n\nTotal: $${total} MXN\n🚚 Envío: GRATIS\n⏱ Tiempo estimado: 40 minutos\n📍 Dirección: ${pedido.direccion || ""}, ${pedido.colonia || ""}\n📝 Referencias: ${pedido.referencias || "Sin referencias"}\n\n¡Gracias! 🍣`;
+  }
+
+  return `✅ ¡Pedido confirmado para recoger!\n\n${lista}\n\nTotal: $${total} MXN\n⏱ Tiempo: ${restaurante.politicas.tiempo_espera_pedido}\n📍 Sucursal: ${pedido.sucursal || "Por confirmar"}\n\n¡Te esperamos! 🍣`;
 }
 
 function generarConfirmacionReservacion(res) {
