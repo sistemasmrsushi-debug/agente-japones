@@ -38,9 +38,10 @@ router.post("/llamada/entrante", (req, res) => {
   const twilio = getTwilio();
   const twiml = new twilio.twiml.VoiceResponse();
 
+  // Saludo simple — el bip indica cuándo hablar
   twiml.say(
     { language: "es-MX", voice: "Polly.Mia-Neural" },
-    textoASSML("Bienvenido a Mr. Sushi. Diga su pedido después del tono.", "medium")
+    textoASSML("Bienvenido a Mr. Sushi, ¿en qué te puedo ayudar?", "medium")
   );
 
   twiml.record({
@@ -52,7 +53,8 @@ router.post("/llamada/entrante", (req, res) => {
     timeout: 4,
   });
 
-  twiml.say({ language: "es-MX", voice: "Polly.Mia-Neural" }, textoASSML("No escuché nada. Hasta luego.", "medium"));
+  twiml.say({ language: "es-MX", voice: "Polly.Mia-Neural" },
+    textoASSML("No escuché nada. Hasta luego.", "medium"));
   twiml.hangup();
 
   res.type("text/xml").send(twiml.toString());
@@ -97,19 +99,14 @@ router.post("/llamada/respuesta", async (req, res) => {
     const resultado = await procesarMensaje(historial, textoCliente);
     conversaciones.set(telefono, resultado.historialActualizado);
 
-    // Responder con voz natural
+    // Respuesta del agente
     twiml.say(
       { language: "es-MX", voice: "Polly.Mia-Neural" },
       textoASSML(resultado.texto, "medium")
     );
 
-    // Pausa de 3 segundos para que el cliente se prepare
-    twiml.pause({ length: 3 });
-
-    twiml.say(
-      { language: "es-MX", voice: "Polly.Mia-Neural" },
-      textoASSML("¿Necesitas algo más? Habla después del tono.", "medium")
-    );
+    // Pausa de 2 segundos y luego bip directo — sin mensaje extra
+    twiml.pause({ length: 2 });
 
     twiml.record({
       action: `${process.env.BASE_URL}/llamada/respuesta`,
