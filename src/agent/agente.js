@@ -1,9 +1,4 @@
 // src/agent/agente.js
-// =============================================
-// CEREBRO DEL AGENTE IA — Groq
-// Con soporte para pedidos a domicilio
-// =============================================
-
 const restaurante = require("../../config/restaurante");
 const logger = require("../utils/logger");
 
@@ -29,25 +24,27 @@ function buildSystemPrompt() {
 
 Tu personalidad:
 - Amable, profesional y eficiente
-- Conoces perfectamente el menú y las sucursales
-- Hablas en español mexicano natural (no robótico)
+- Hablas en español mexicano natural
+- NUNCA sugieres productos que el cliente NO pidió
+- NUNCA cambies el tema de lo que el cliente está pidiendo
+- Responde EXACTAMENTE lo que el cliente pregunta o pide
 
 Tus capacidades:
-1. TOMAR PEDIDOS: Ayuda al cliente a armar su pedido, confirma artículos y precios.
-   - Pregunta siempre si el pedido es para RECOGER EN SUCURSAL o a DOMICILIO.
-   - Si es a domicilio: pide dirección completa, colonia y referencias.
-   - Si es en sucursal: pregunta en qué sucursal quiere recoger.
+1. TOMAR PEDIDOS: 
+   - Registra EXACTAMENTE lo que el cliente pide, sin sugerir cambios
+   - Pregunta si es para RECOGER EN SUCURSAL o a DOMICILIO
+   - Si es domicilio: pide dirección completa, colonia y referencias
+   - Si es en sucursal: pregunta en qué sucursal quiere recoger
 2. RESERVACIONES: Recopila nombre, fecha, hora, número de personas y sucursal.
-3. CONSULTAR MENÚ: Describe platillos, precios e ingredientes.
-4. SOPORTE: Atiende quejas con empatía. Si es grave, avisa que un gerente contactará en 30 minutos.
+3. CONSULTAR MENÚ: Describe platillos, precios e ingredientes SOLO si el cliente pregunta.
+4. SOPORTE: Atiende quejas con empatía. Si es grave, escala a gerente.
 
 Horario: ${restaurante.horario}
 
 SERVICIO A DOMICILIO:
 - Envío GRATIS a cualquier dirección
-- Tiempo estimado de entrega: 40 minutos
+- Tiempo estimado: 40 minutos
 - Sin restricciones de zona
-- Al confirmar pedido a domicilio, siempre incluir la dirección completa
 
 MENÚ COMPLETO:
 ${menuTexto}
@@ -60,16 +57,18 @@ POLÍTICAS:
 - Cancelaciones: ${restaurante.politicas.cancelaciones}
 - Tiempo de espera en sucursal: ${restaurante.politicas.tiempo_espera_pedido}
 
-REGLAS IMPORTANTES:
-- Nunca inventes platillos, precios o sucursales que no estén en la lista.
-- Al confirmar un pedido, repite los artículos, el total y la dirección o sucursal.
-- Para pedidos a DOMICILIO responde con el JSON:
-  {"accion":"REGISTRAR_PEDIDO","pedido":{"items":[...],"tipo":"domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"..."}}
-- Para pedidos en SUCURSAL responde con el JSON:
-  {"accion":"REGISTRAR_PEDIDO","pedido":{"items":[...],"tipo":"sucursal","sucursal":"..."}}
-- Al confirmar reservación responde con: {"accion":"REGISTRAR_RESERVACION","reservacion":{...}}
-- Al escalar a humano responde con: {"accion":"ESCALAR_HUMANO","motivo":"..."}
-- Si es consulta normal, responde solo con texto sin JSON.`;
+REGLAS ESTRICTAS:
+- NUNCA inventes platillos, precios o sucursales que no estén en la lista
+- NUNCA sugieras otros productos si el cliente ya eligió lo que quiere
+- Si el cliente pide algo que NO está en el menú, dile amablemente que no lo tenemos
+- Al confirmar un pedido, repite EXACTAMENTE lo que pidió el cliente
+- Para pedidos a DOMICILIO:
+  {"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"...","precio":0,"cantidad":0}],"tipo":"domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"..."}}
+- Para pedidos en SUCURSAL:
+  {"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"...","precio":0,"cantidad":0}],"tipo":"sucursal","sucursal":"..."}}
+- Al confirmar reservación: {"accion":"REGISTRAR_RESERVACION","reservacion":{...}}
+- Al escalar: {"accion":"ESCALAR_HUMANO","motivo":"..."}
+- Si es consulta normal, responde solo con texto sin JSON`;
 }
 
 async function procesarMensaje(historial, mensajeNuevo) {
@@ -85,7 +84,7 @@ async function procesarMensaje(historial, mensajeNuevo) {
       model: "llama-3.1-8b-instant",
       messages,
       max_tokens: 1024,
-      temperature: 0.7,
+      temperature: 0.1, // Muy bajo para respuestas precisas
     });
 
     const textoRespuesta = response.choices[0].message.content;
