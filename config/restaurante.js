@@ -35,7 +35,7 @@ module.exports = {
   menu: {
     "Entradas": [
       { nombre: "Edamame",              precio: 85,   descripcion: "Frijoles de soya al vapor con sal de mar" },
-      { nombre: "Gyozas",               precio: 120,  descripcion: "Dumplings de cerdo y verduras, fritos o al vapor" },
+      { nombre: "Dumpling",             precio: 120,  descripcion: "Dumplings de cerdo y verduras, fritos o al vapor" },
       { nombre: "Chiles Tempura",       precio: 130,  descripcion: "Bolitas de pulpo con salsa takoyaki y mayonesa" },
       { nombre: "Edamames Spicy",       precio: 70,   descripcion: "Sopa de miso con tofu y alga wakame" },
     ],
@@ -43,19 +43,19 @@ module.exports = {
       { nombre: "California Roll",  precio: 160,  descripcion: "Cangrejo, aguacate y pepino (8 pzas)" },
       { nombre: "Spicy Tuna",       precio: 185,  descripcion: "Atún picante con sriracha (8 pzas)" },
       { nombre: "Dragon Roll",      precio: 220,  descripcion: "Camarón tempura, aguacate y anguila (8 pzas)" },
-      { nombre: "Rainbow Roll",     precio: 250,  descripcion: "California roll cubierto de sashimi variado (8 pzas)" },
+      { nombre: "Tunagui",          precio: 250,  descripcion: "California roll cubierto de sashimi variado (8 pzas)" },
     ],
     "Ramen": [
-      { nombre: "Tonkotsu Ramen",   precio: 195,  descripcion: "Caldo de cerdo 12 hrs, chashu, huevo nitamago" },
-      { nombre: "Shoyu Ramen",      precio: 180,  descripcion: "Caldo claro de soya, pollo, bambú y nori" },
-      { nombre: "Miso Ramen",       precio: 185,  descripcion: "Caldo de miso, maíz, mantequilla y chashu" },
-      { nombre: "Vegetariano",      precio: 170,  descripcion: "Caldo de shiitake, tofu, verduras de temporada" },
+      { nombre: "Ramen Bacon",       precio: 195,  descripcion: "Caldo de cerdo 12 hrs, chashu, huevo nitamago" },
+      { nombre: "Ramen Curry",       precio: 180,  descripcion: "Caldo claro de soya, pollo, bambú y nori" },
+      { nombre: "Ramen Coco",        precio: 185,  descripcion: "Caldo de miso, maíz, mantequilla y chashu" },
+      { nombre: "Ramen Mariscos ",   precio: 170,  descripcion: "Caldo de shiitake, tofu, verduras de temporada" },
     ],
     "Platos Fuertes": [
-      { nombre: "Teriyaki de Pollo",precio: 185,  descripcion: "Pollo glaseado con salsa teriyaki, arroz y ensalada" },
-      { nombre: "Katsu Curry",      precio: 195,  descripcion: "Milanesa de cerdo con curry japonés y arroz" },
-      { nombre: "Chirashi",         precio: 290,  descripcion: "Sashimi variado sobre arroz de sushi" },
-      { nombre: "Bento Box",        precio: 250,  descripcion: "Arroz, salmón teriyaki, gyozas, ensalada y miso" },
+      { nombre: "Chicken Teriyaki", precio: 185,  descripcion: "Pollo glaseado con salsa teriyaki, arroz y ensalada" },
+      { nombre: "Katsu Curry",       precio: 195,  descripcion: "Milanesa de cerdo con curry japonés y arroz" },
+      { nombre: "Chirashi",          precio: 290,  descripcion: "Sashimi variado sobre arroz de sushi" },
+      { nombre: "Bento Box",         precio: 250,  descripcion: "Arroz, salmón teriyaki, gyozas, ensalada y miso" },
     ],
     "Bebidas": [
       { nombre: "Agua / Refresco",  precio: 40,   descripcion: "Agua natural, mineral o refresco" },
