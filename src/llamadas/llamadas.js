@@ -1,4 +1,5 @@
 // src/llamadas/llamadas.js
+// Usa Twilio Transcription (más rápido que Deepgram para llamadas)
 const express = require("express");
 const router = express.Router();
 const NodeCache = require("node-cache");
@@ -8,11 +9,6 @@ const logger = require("../utils/logger");
 const conversaciones = new NodeCache({ stdTTL: 86400 });
 
 function getTwilio() { return require("twilio"); }
-
-function getDeepgram() {
-  const { createClient } = require("@deepgram/sdk");
-  return createClient(process.env.DEEPGRAM_API_KEY);
-}
 
 function limpiarTexto(texto) {
   return texto
@@ -26,8 +22,7 @@ function limpiarTexto(texto) {
 }
 
 function textoASSML(texto, velocidad = "medium") {
-  const textoLimpio = limpiarTexto(texto);
-  return `<speak><prosody rate="${velocidad}">${textoLimpio}</prosody></speak>`;
+  return `<speak><prosody rate="${velocidad}">${limpiarTexto(texto)}</prosody></speak>`;
 }
 
 // ── LLAMADA ENTRANTE ──
@@ -38,7 +33,6 @@ router.post("/llamada/entrante", (req, res) => {
   const twilio = getTwilio();
   const twiml = new twilio.twiml.VoiceResponse();
 
-  // Saludo simple — el bip indica cuándo hablar
   twiml.say(
     { language: "es-MX", voice: "Polly.Mia-Neural" },
     textoASSML("Bienvenido a Mr. Sushi, ¿en qué te puedo ayudar?", "medium")
@@ -47,10 +41,12 @@ router.post("/llamada/entrante", (req, res) => {
   twiml.record({
     action: `${process.env.BASE_URL}/llamada/respuesta`,
     method: "POST",
-    maxLength: 20,
+    maxLength: 15,
     playBeep: true,
-    transcribe: false,
-    timeout: 4,
+    transcribe: true,
+    transcribeCallback: `${process.env.BASE_URL}/llamada/transcripcion`,
+    timeout: 3,
+    language: "es-MX",
   });
 
   twiml.say({ language: "es-MX", voice: "Polly.Mia-Neural" },
@@ -60,78 +56,87 @@ router.post("/llamada/entrante", (req, res) => {
   res.type("text/xml").send(twiml.toString());
 });
 
-// ── PROCESAR AUDIO ──
-router.post("/llamada/respuesta", async (req, res) => {
+// ── RECIBE GRABACIÓN (responde rápido mientras espera transcripción) ──
+router.post("/llamada/respuesta", (req, res) => {
   const telefono = req.body.From || "desconocido";
-  const recordingUrl = req.body.RecordingUrl;
-
-  logger.info(`Audio recibido de ${telefono}`);
+  logger.info(`Grabación recibida de ${telefono}, esperando transcripción...`);
 
   const twilio = getTwilio();
   const twiml = new twilio.twiml.VoiceResponse();
 
+  // Música de espera breve mientras procesa
+  twiml.pause({ length: 1 });
+
+  res.type("text/xml").send(twiml.toString());
+});
+
+// ── RECIBE TRANSCRIPCIÓN DE TWILIO Y PROCESA CON IA ──
+router.post("/llamada/transcripcion", async (req, res) => {
+  res.sendStatus(200);
+
+  const telefono = req.body.From || req.body.Called || "desconocido";
+  const callSid = req.body.CallSid;
+  const textoCliente = req.body.TranscriptionText || "";
+
+  logger.info(`Transcripción Twilio [${telefono}]: "${textoCliente}"`);
+
+  if (!textoCliente || textoCliente.trim() === "") {
+    logger.warn(`Transcripción vacía para ${telefono}`);
+    await responderPorLlamada(callSid, "No pude escucharte. Por favor llama de nuevo.");
+    return;
+  }
+
   try {
-    const urlObj = new URL(recordingUrl + ".wav");
-    urlObj.username = process.env.TWILIO_ACCOUNT_SID;
-    urlObj.password = process.env.TWILIO_AUTH_TOKEN;
-
-    const deepgram = getDeepgram();
-    const { result, error } = await deepgram.listen.prerecorded.transcribeUrl(
-      { url: urlObj.toString() },
-      { model: "base", language: "es", smart_format: false, punctuate: false }
-    );
-
-    if (error) logger.error("Error Deepgram: " + JSON.stringify(error));
-
-    const textoCliente = result?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
-    logger.info(`Transcripción: "${textoCliente}"`);
-
-    if (!textoCliente || textoCliente.trim() === "") {
-      twiml.say(
-        { language: "es-MX", voice: "Polly.Mia-Neural" },
-        textoASSML("No te escuché. Por favor intenta de nuevo.", "medium")
-      );
-      twiml.redirect(`${process.env.BASE_URL}/llamada/entrante`);
-      return res.type("text/xml").send(twiml.toString());
-    }
-
     const historial = conversaciones.get(telefono) || [];
     const resultado = await procesarMensaje(historial, textoCliente);
     conversaciones.set(telefono, resultado.historialActualizado);
 
-    // Respuesta del agente
-    twiml.say(
-      { language: "es-MX", voice: "Polly.Mia-Neural" },
-      textoASSML(resultado.texto, "medium")
+    await responderPorLlamada(callSid, resultado.texto);
+  } catch (error) {
+    logger.error("Error procesando transcripción: " + error.message);
+    await responderPorLlamada(callSid, "Tuvimos un problema. Por favor llama de nuevo.");
+  }
+});
+
+// ── RESPONDER AL CLIENTE VIA TWILIO CALL ──
+async function responderPorLlamada(callSid, texto) {
+  try {
+    const client = require("twilio")(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_AUTH_TOKEN
     );
 
-    // Pausa de 2 segundos y luego bip directo — sin mensaje extra
+    const twilio = getTwilio();
+    const twiml = new twilio.twiml.VoiceResponse();
+
+    twiml.say(
+      { language: "es-MX", voice: "Polly.Mia-Neural" },
+      textoASSML(texto, "medium")
+    );
+
     twiml.pause({ length: 2 });
 
     twiml.record({
       action: `${process.env.BASE_URL}/llamada/respuesta`,
       method: "POST",
-      maxLength: 20,
+      maxLength: 15,
       playBeep: true,
-      timeout: 5,
+      transcribe: true,
+      transcribeCallback: `${process.env.BASE_URL}/llamada/transcripcion`,
+      timeout: 3,
+      language: "es-MX",
     });
 
-    twiml.say(
-      { language: "es-MX", voice: "Polly.Mia-Neural" },
-      textoASSML("Gracias por llamar a Mr. Sushi. Hasta pronto.", "medium")
-    );
+    twiml.say({ language: "es-MX", voice: "Polly.Mia-Neural" },
+      textoASSML("Gracias por llamar a Mr. Sushi. Hasta pronto.", "medium"));
     twiml.hangup();
+
+    await client.calls(callSid).update({ twiml: twiml.toString() });
+    logger.info(`Respuesta enviada al call ${callSid}`);
 
   } catch (error) {
-    logger.error("Error procesando llamada: " + error.message);
-    twiml.say(
-      { language: "es-MX", voice: "Polly.Mia-Neural" },
-      textoASSML("Tuvimos un problema. Por favor llama de nuevo.", "medium")
-    );
-    twiml.hangup();
+    logger.error("Error respondiendo llamada: " + error.message);
   }
-
-  res.type("text/xml").send(twiml.toString());
-});
+}
 
 module.exports = router;
