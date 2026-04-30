@@ -20,9 +20,17 @@ function limpiarTexto(texto) {
   return texto
     .replace(/[*_~`#]/g, "")
     .replace(/[\u{1F300}-\u{1F9FF}]/gu, "")
-    .replace(/✅|❌|⏳|🔔|📞|💬|🍣|🎌/g, "")
+    .replace(/✅|❌|⏳|🔔|📞|💬|🍣|🎌|🚚|📍|📝|👤|📅|👥/g, "")
     .replace(/\n+/g, ". ")
+    .replace(/\s+/g, " ")
+    .trim()
     .substring(0, 400);
+}
+
+// Convertir texto a SSML con velocidad ajustada
+function textoASSML(texto, velocidad = "fast") {
+  const textoLimpio = limpiarTexto(texto);
+  return `<speak><prosody rate="${velocidad}">${textoLimpio}</prosody></speak>`;
 }
 
 // ── LLAMADA ENTRANTE ──
@@ -33,9 +41,10 @@ router.post("/llamada/entrante", (req, res) => {
   const twilio = getTwilio();
   const twiml = new twilio.twiml.VoiceResponse();
 
+  // Saludo rápido y claro
   twiml.say(
-    { language: "es-MX" },
-    "Bienvenido a Mr. Sushi. Diga su pedido o consulta después del tono."
+    { language: "es-MX", voice: "Polly.Mia-Neural" },
+    textoASSML("Bienvenido a Mr. Sushi. Diga su pedido después del tono.", "medium")
   );
 
   twiml.record({
@@ -47,7 +56,10 @@ router.post("/llamada/entrante", (req, res) => {
     timeout: 2,
   });
 
-  twiml.say({ language: "es-MX" }, "No escuché nada. Hasta luego.");
+  twiml.say(
+    { language: "es-MX", voice: "Polly.Mia-Neural" },
+    textoASSML("No escuché nada. Hasta luego.", "medium")
+  );
   twiml.hangup();
 
   res.type("text/xml").send(twiml.toString());
@@ -65,21 +77,15 @@ router.post("/llamada/respuesta", async (req, res) => {
   const twiml = new twilio.twiml.VoiceResponse();
 
   try {
+    // Transcribir con Deepgram
     const urlObj = new URL(recordingUrl + ".wav");
     urlObj.username = process.env.TWILIO_ACCOUNT_SID;
     urlObj.password = process.env.TWILIO_AUTH_TOKEN;
 
     const deepgram = getDeepgram();
-
-    // Usar base modelo más rápido
     const { result, error } = await deepgram.listen.prerecorded.transcribeUrl(
       { url: urlObj.toString() },
-      {
-        model: "base",
-        language: "es",
-        smart_format: false,
-        punctuate: false,
-      }
+      { model: "base", language: "es", smart_format: false, punctuate: false }
     );
 
     if (error) logger.error("Error Deepgram: " + JSON.stringify(error));
@@ -88,33 +94,53 @@ router.post("/llamada/respuesta", async (req, res) => {
     logger.info(`Transcripción: "${textoCliente}"`);
 
     if (!textoCliente || textoCliente.trim() === "") {
-      twiml.say({ language: "es-MX" }, "No te escuché bien. Intenta de nuevo.");
+      twiml.say(
+        { language: "es-MX", voice: "Polly.Mia-Neural" },
+        textoASSML("No te escuché. Por favor intenta de nuevo.", "medium")
+      );
       twiml.redirect(`${process.env.BASE_URL}/llamada/entrante`);
       return res.type("text/xml").send(twiml.toString());
     }
 
+    // Procesar con agente IA
     const historial = conversaciones.get(telefono) || [];
     const resultado = await procesarMensaje(historial, textoCliente);
     conversaciones.set(telefono, resultado.historialActualizado);
 
-    const textoRespuesta = limpiarTexto(resultado.texto);
-    logger.info(`Respuesta: "${textoRespuesta}"`);
+    // Responder con voz rápida y natural
+    twiml.say(
+      { language: "es-MX", voice: "Polly.Mia-Neural" },
+      textoASSML(resultado.texto, "fast")
+    );
 
-    twiml.say({ language: "es-MX" }, textoRespuesta);
-    twiml.say({ language: "es-MX" }, "¿Necesitas algo más? Habla después del tono.");
+    // Pausa antes de grabar para evitar que se encimen
+    twiml.pause({ length: 1 });
+
+    twiml.say(
+      { language: "es-MX", voice: "Polly.Mia-Neural" },
+      textoASSML("¿Algo más? Habla después del tono.", "medium")
+    );
+
     twiml.record({
       action: `${process.env.BASE_URL}/llamada/respuesta`,
       method: "POST",
       maxLength: 20,
       playBeep: true,
-      timeout: 2,
+      timeout: 3,
     });
-    twiml.say({ language: "es-MX" }, "Gracias por llamar a Mr. Sushi. Hasta pronto.");
+
+    twiml.say(
+      { language: "es-MX", voice: "Polly.Mia-Neural" },
+      textoASSML("Gracias por llamar a Mr. Sushi. Hasta pronto.", "medium")
+    );
     twiml.hangup();
 
   } catch (error) {
     logger.error("Error procesando llamada: " + error.message);
-    twiml.say({ language: "es-MX" }, "Tuvimos un problema. Por favor llama de nuevo.");
+    twiml.say(
+      { language: "es-MX", voice: "Polly.Mia-Neural" },
+      textoASSML("Tuvimos un problema. Por favor llama de nuevo.", "medium")
+    );
     twiml.hangup();
   }
 
