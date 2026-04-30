@@ -34,13 +34,13 @@ module.exports = {
 
   menu: {
     "Entradas": [
-      { nombre: "Edamame",              precio: 85,   descripcion: "Frijoles de soya al vapor con sal de mar" },
+      { nombre: "Edamames",              precio: 85,   descripcion: "Frijoles de soya al vapor" },
       { nombre: "Dumpling",             precio: 120,  descripcion: "Dumplings de cerdo y verduras, fritos o al vapor" },
-      { nombre: "Chiles Tempura",       precio: 130,  descripcion: "Bolitas de pulpo con salsa takoyaki y mayonesa" },
-      { nombre: "Edamames Spicy",       precio: 70,   descripcion: "Sopa de miso con tofu y alga wakame" },
+      { nombre: "Chiles Tempura",       precio: 130,  descripcion: "Chiles jajapeños" },
+      { nombre: "Edamames Spicy",       precio: 70,   descripcion: "Edamames Spicy" },
     ],
-    "Sushi Rolls": [
-      { nombre: "California Atun",  precio: 160,  descripcion: "Cangrejo, aguacate y pepino (10 pzas)" },
+    "Rollos Especialidades": [
+      { nombre: "California Atun",  precio: 160,  descripcion: "Atun, aguacate y pepino (10 pzas)" },
       { nombre: "Spicy Tuna",       precio: 185,  descripcion: "Atún picante con sriracha (10 pzas)" },
       { nombre: "Mr. Dragon",      precio: 220,  descripcion: "Camarón tempura, aguacate y anguila (10 pzas)" },
       { nombre: "Tunagui",          precio: 250,  descripcion: "Tunagui cubierto de sashimi variado (10 pzas)" },
