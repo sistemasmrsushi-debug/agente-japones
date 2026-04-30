@@ -53,16 +53,16 @@ module.exports = {
     ],
     "Platos Fuertes": [
       { nombre: "Chicken Teriyaki", precio: 185,  descripcion: "Pollo glaseado con salsa teriyaki, arroz y ensalada" },
-      { nombre: "Katsu Curry",       precio: 195,  descripcion: "Milanesa de cerdo con curry japonés y arroz" },
-      { nombre: "Chirashi",          precio: 290,  descripcion: "Sashimi variado sobre arroz de sushi" },
-      { nombre: "Bento Box",         precio: 250,  descripcion: "Arroz, salmón teriyaki, gyozas, ensalada y miso" },
+      { nombre: "Tokyo Bowl",       precio: 195,  descripcion: "Milanesa de cerdo con curry japonés y arroz" },
+      { nombre: "Gohan Teriyaki",          precio: 290,  descripcion: "Sashimi variado sobre arroz de sushi" },
+      { nombre: "Sake Wake",         precio: 250,  descripcion: "Arroz, salmón teriyaki, gyozas, ensalada y miso" },
     ],
     "Bebidas": [
-      { nombre: "Agua / Refresco",  precio: 40,   descripcion: "Agua natural, mineral o refresco" },
+      { nombre: "Refresco",  precio: 40,   descripcion: "Agua natural, mineral o refresco" },
     ],
     "Postres": [
-      { nombre: "Mochi (3 pzas)",   precio: 90,   descripcion: "Bolitas de arroz rellenas: fresa, mango, matcha" },
-      { nombre: "Cheesecake Matcha",precio: 95,   descripcion: "Cheesecake de té verde con salsa de fresa" },
+      { nombre: "Bomba dulce de leche",   precio: 90,   descripcion: "Bolitas de arroz rellenas: fresa, mango, matcha" },
+      { nombre: "Tapioca",precio: 95,   descripcion: "Cheesecake de té verde con salsa de fresa" },
     ],
   },
 
