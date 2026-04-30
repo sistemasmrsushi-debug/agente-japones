@@ -42,7 +42,6 @@ router.post("/llamada/entrante", (req, res) => {
     playBeep: true,
     transcribe: false,
     timeout: 5,
-    recordingStatusCallback: `${process.env.BASE_URL}/llamada/status`,
   });
 
   twiml.say({ language: "es-MX", voice: "Polly.Mia" }, "No escuché nada. Hasta luego.");
@@ -58,17 +57,35 @@ router.post("/llamada/respuesta", async (req, res) => {
   const callSid = req.body.CallSid;
   const recordingDuration = req.body.RecordingDuration;
 
-  logger.info(`Audio recibido de ${telefono} · Duración: ${recordingDuration}s · URL: ${recordingUrl}`);
+  logger.info(`Audio recibido · Duración: ${recordingDuration}s · URL: ${recordingUrl}`);
 
   const twilio = getTwilio();
   const twiml = new twilio.twiml.VoiceResponse();
 
   try {
-    // Descargar en formato WAV que es más compatible con Deepgram
-    const audioBuffer = await descargarAudioTwilio(recordingUrl + ".wav");
-    logger.info(`Audio descargado: ${audioBuffer.length} bytes (WAV)`);
+    // Construir URL con credenciales embebidas para Deepgram
+    const urlObj = new URL(recordingUrl + ".wav");
+    urlObj.username = process.env.TWILIO_ACCOUNT_SID;
+    urlObj.password = process.env.TWILIO_AUTH_TOKEN;
+    const urlConCredenciales = urlObj.toString();
 
-    const textoCliente = await transcribirBuffer(audioBuffer, "audio/wav");
+    logger.info(`Enviando a Deepgram: ${recordingUrl}.wav`);
+
+    const deepgram = getDeepgram();
+    const { result, error } = await deepgram.listen.prerecorded.transcribeUrl(
+      { url: urlConCredenciales },
+      {
+        model: "nova-2",
+        language: "es",
+        smart_format: true,
+      }
+    );
+
+    if (error) {
+      logger.error("Error Deepgram: " + JSON.stringify(error));
+    }
+
+    const textoCliente = result?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
     logger.info(`Transcripción: "${textoCliente}"`);
 
     if (!textoCliente || textoCliente.trim() === "") {
@@ -114,12 +131,6 @@ router.post("/llamada/respuesta", async (req, res) => {
   res.type("text/xml").send(twiml.toString());
 });
 
-// ── STATUS CALLBACK ──
-router.post("/llamada/status", (req, res) => {
-  logger.info(`Recording status: ${JSON.stringify(req.body)}`);
-  res.sendStatus(200);
-});
-
 // ── SERVIR AUDIO ──
 router.get("/llamada/audio/:id", (req, res) => {
   const audioPath = path.join(AUDIO_DIR, `${req.params.id}.mp3`);
@@ -127,53 +138,6 @@ router.get("/llamada/audio/:id", (req, res) => {
   res.setHeader("Content-Type", "audio/mpeg");
   fs.createReadStream(audioPath).pipe(res);
 });
-
-// ── DESCARGAR AUDIO CON AUTH TWILIO ──
-function descargarAudioTwilio(url) {
-  return new Promise((resolve, reject) => {
-    const auth = Buffer.from(
-      `${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`
-    ).toString("base64");
-
-    const options = { headers: { "Authorization": `Basic ${auth}` } };
-    const client = url.startsWith("https") ? https : http;
-
-    client.get(url, options, (response) => {
-      if (response.statusCode === 301 || response.statusCode === 302) {
-        return descargarAudioTwilio(response.headers.location).then(resolve).catch(reject);
-      }
-      if (response.statusCode !== 200) {
-        return reject(new Error(`HTTP ${response.statusCode} al descargar audio`));
-      }
-      const chunks = [];
-      response.on("data", chunk => chunks.push(chunk));
-      response.on("end", () => resolve(Buffer.concat(chunks)));
-      response.on("error", reject);
-    }).on("error", reject);
-  });
-}
-
-// ── TRANSCRIBIR CON DEEPGRAM ──
-async function transcribirBuffer(audioBuffer, mimetype = "audio/wav") {
-  try {
-    const deepgram = getDeepgram();
-    const { result } = await deepgram.listen.prerecorded.transcribeFile(
-      audioBuffer,
-      {
-        model: "nova-2",
-        language: "es",
-        smart_format: true,
-        mimetype,
-      }
-    );
-    const texto = result?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
-    logger.info(`Deepgram resultado: "${texto}"`);
-    return texto;
-  } catch (error) {
-    logger.error("Error Deepgram: " + error.message);
-    return "";
-  }
-}
 
 // ── GENERAR AUDIO TTS ──
 async function generarAudioTTS(texto, audioId) {
