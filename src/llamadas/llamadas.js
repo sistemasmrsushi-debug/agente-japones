@@ -7,9 +7,7 @@ const logger = require("../utils/logger");
 
 const conversaciones = new NodeCache({ stdTTL: 86400 });
 
-function getTwilio() {
-  return require("twilio");
-}
+function getTwilio() { return require("twilio"); }
 
 function getDeepgram() {
   const { createClient } = require("@deepgram/sdk");
@@ -27,8 +25,7 @@ function limpiarTexto(texto) {
     .substring(0, 400);
 }
 
-// Convertir texto a SSML con velocidad ajustada
-function textoASSML(texto, velocidad = "fast") {
+function textoASSML(texto, velocidad = "medium") {
   const textoLimpio = limpiarTexto(texto);
   return `<speak><prosody rate="${velocidad}">${textoLimpio}</prosody></speak>`;
 }
@@ -41,7 +38,6 @@ router.post("/llamada/entrante", (req, res) => {
   const twilio = getTwilio();
   const twiml = new twilio.twiml.VoiceResponse();
 
-  // Saludo rápido y claro
   twiml.say(
     { language: "es-MX", voice: "Polly.Mia-Neural" },
     textoASSML("Bienvenido a Mr. Sushi. Diga su pedido después del tono.", "medium")
@@ -53,13 +49,10 @@ router.post("/llamada/entrante", (req, res) => {
     maxLength: 20,
     playBeep: true,
     transcribe: false,
-    timeout: 2,
+    timeout: 4,
   });
 
-  twiml.say(
-    { language: "es-MX", voice: "Polly.Mia-Neural" },
-    textoASSML("No escuché nada. Hasta luego.", "medium")
-  );
+  twiml.say({ language: "es-MX", voice: "Polly.Mia-Neural" }, textoASSML("No escuché nada. Hasta luego.", "medium"));
   twiml.hangup();
 
   res.type("text/xml").send(twiml.toString());
@@ -69,7 +62,6 @@ router.post("/llamada/entrante", (req, res) => {
 router.post("/llamada/respuesta", async (req, res) => {
   const telefono = req.body.From || "desconocido";
   const recordingUrl = req.body.RecordingUrl;
-  const callSid = req.body.CallSid;
 
   logger.info(`Audio recibido de ${telefono}`);
 
@@ -77,7 +69,6 @@ router.post("/llamada/respuesta", async (req, res) => {
   const twiml = new twilio.twiml.VoiceResponse();
 
   try {
-    // Transcribir con Deepgram
     const urlObj = new URL(recordingUrl + ".wav");
     urlObj.username = process.env.TWILIO_ACCOUNT_SID;
     urlObj.password = process.env.TWILIO_AUTH_TOKEN;
@@ -102,23 +93,22 @@ router.post("/llamada/respuesta", async (req, res) => {
       return res.type("text/xml").send(twiml.toString());
     }
 
-    // Procesar con agente IA
     const historial = conversaciones.get(telefono) || [];
     const resultado = await procesarMensaje(historial, textoCliente);
     conversaciones.set(telefono, resultado.historialActualizado);
 
-    // Responder con voz rápida y natural
+    // Responder con voz natural
     twiml.say(
       { language: "es-MX", voice: "Polly.Mia-Neural" },
-      textoASSML(resultado.texto, "fast")
+      textoASSML(resultado.texto, "medium")
     );
 
-    // Pausa antes de grabar para evitar que se encimen
-    twiml.pause({ length: 1 });
+    // Pausa de 3 segundos para que el cliente se prepare
+    twiml.pause({ length: 3 });
 
     twiml.say(
       { language: "es-MX", voice: "Polly.Mia-Neural" },
-      textoASSML("¿Algo más? Habla después del tono.", "medium")
+      textoASSML("¿Necesitas algo más? Habla después del tono.", "medium")
     );
 
     twiml.record({
@@ -126,7 +116,7 @@ router.post("/llamada/respuesta", async (req, res) => {
       method: "POST",
       maxLength: 20,
       playBeep: true,
-      timeout: 3,
+      timeout: 5,
     });
 
     twiml.say(
