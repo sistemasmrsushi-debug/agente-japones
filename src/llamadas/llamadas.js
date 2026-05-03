@@ -1,5 +1,5 @@
 // src/llamadas/llamadas.js
-// Usa Gather con speech — conversación natural sin bip
+// Usa Gather con speech — modelo estándar (más económico)
 const express = require("express");
 const router = express.Router();
 const NodeCache = require("node-cache");
@@ -40,7 +40,7 @@ router.post("/llamada/entrante", (req, res) => {
     language: "es-MX",
     speechTimeout: "auto",
     speechModel: "phone_call",
-    enhanced: true,
+    // enhanced: false — modelo estándar más económico
   });
 
   gather.say(
@@ -74,7 +74,6 @@ router.post("/llamada/respuesta", async (req, res) => {
       language: "es-MX",
       speechTimeout: "auto",
       speechModel: "phone_call",
-      enhanced: true,
     });
     gather.say(
       { language: "es-MX", voice: "Polly.Mia-Neural" },
@@ -91,7 +90,6 @@ router.post("/llamada/respuesta", async (req, res) => {
     const textoRespuesta = limpiarTexto(resultado.texto);
     logger.info(`Respuesta: "${textoRespuesta}"`);
 
-    // Responder y escuchar de nuevo — conversación natural
     const gather = twiml.gather({
       input: "speech",
       action: `${process.env.BASE_URL}/llamada/respuesta`,
@@ -99,7 +97,6 @@ router.post("/llamada/respuesta", async (req, res) => {
       language: "es-MX",
       speechTimeout: "auto",
       speechModel: "phone_call",
-      enhanced: true,
     });
 
     gather.say(
