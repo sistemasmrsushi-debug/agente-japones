@@ -1,5 +1,5 @@
 // src/llamadas/llamadas.js
-// Usa Gather con speech — más natural, sin bip
+// Usa Gather con speech — conversación natural sin bip
 const express = require("express");
 const router = express.Router();
 const NodeCache = require("node-cache");
@@ -21,11 +21,8 @@ function limpiarTexto(texto) {
     .substring(0, 400);
 }
 
-function say(twiml, texto, velocidad = "medium") {
-  twiml.say(
-    { language: "es-MX", voice: "Polly.Mia-Neural" },
-    `<speak><prosody rate="${velocidad}">${limpiarTexto(texto)}</prosody></speak>`
-  );
+function textoASSML(texto, velocidad = "medium") {
+  return `<speak><prosody rate="${velocidad}">${limpiarTexto(texto)}</prosody></speak>`;
 }
 
 // ── LLAMADA ENTRANTE ──
@@ -36,7 +33,6 @@ router.post("/llamada/entrante", (req, res) => {
   const twilio = getTwilio();
   const twiml = new twilio.twiml.VoiceResponse();
 
-  // Gather escucha directamente sin bip
   const gather = twiml.gather({
     input: "speech",
     action: `${process.env.BASE_URL}/llamada/respuesta`,
@@ -49,11 +45,11 @@ router.post("/llamada/entrante", (req, res) => {
 
   gather.say(
     { language: "es-MX", voice: "Polly.Mia-Neural" },
-    `<speak><prosody rate="medium">Bienvenido a Mr. Sushi, ¿en qué te puedo ayudar?</prosody></speak>`
+    textoASSML("Bienvenido a Mr. Sushi, ¿en qué te puedo ayudar?", "medium")
   );
 
-  // Si no habla nada
-  say(twiml, "No escuché nada. Hasta luego.");
+  twiml.say({ language: "es-MX", voice: "Polly.Mia-Neural" },
+    textoASSML("No escuché nada. Hasta luego.", "medium"));
   twiml.hangup();
 
   res.type("text/xml").send(twiml.toString());
@@ -82,7 +78,7 @@ router.post("/llamada/respuesta", async (req, res) => {
     });
     gather.say(
       { language: "es-MX", voice: "Polly.Mia-Neural" },
-      `<speak><prosody rate="medium">No te escuché bien. ¿Me puedes repetir?</prosody></speak>`
+      textoASSML("No te escuché bien. ¿Me puedes repetir?", "medium")
     );
     return res.type("text/xml").send(twiml.toString());
   }
@@ -111,13 +107,14 @@ router.post("/llamada/respuesta", async (req, res) => {
       `<speak><prosody rate="medium">${textoRespuesta}</prosody></speak>`
     );
 
-    // Si no responde después de la respuesta, despedirse
-    say(twiml, "Gracias por llamar a Mr. Sushi. Hasta pronto.");
+    twiml.say({ language: "es-MX", voice: "Polly.Mia-Neural" },
+      textoASSML("Gracias por llamar a Mr. Sushi. Hasta pronto.", "medium"));
     twiml.hangup();
 
   } catch (error) {
     logger.error("Error: " + error.message);
-    say(twiml, "Tuvimos un problema. Por favor llama de nuevo.");
+    twiml.say({ language: "es-MX", voice: "Polly.Mia-Neural" },
+      textoASSML("Tuvimos un problema. Por favor llama de nuevo.", "medium"));
     twiml.hangup();
   }
 
