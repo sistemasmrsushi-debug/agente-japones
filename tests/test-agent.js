@@ -1,9 +1,4 @@
-// tests/test-agent.js
-// =============================================
-// PRUEBA EL AGENTE EN LA TERMINAL
-// Sin necesidad de WhatsApp ni Meta
-// Ejecuta: node tests/test-agent.js
-// =============================================
+
 
 require("dotenv").config();
 const readline = require("readline");

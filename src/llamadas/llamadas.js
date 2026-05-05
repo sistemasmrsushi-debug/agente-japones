@@ -1,5 +1,5 @@
 // src/llamadas/llamadas.js
-// Usa Gather con speech — modelo estándar (más económico)
+// Usa Twilio Gather con speech — sin Deepgram
 const express = require("express");
 const router = express.Router();
 const NodeCache = require("node-cache");
@@ -25,6 +25,18 @@ function textoASSML(texto, velocidad = "medium") {
   return `<speak><prosody rate="${velocidad}">${limpiarTexto(texto)}</prosody></speak>`;
 }
 
+function crearGather(twiml) {
+  return twiml.gather({
+    input: "speech",
+    action: `${process.env.BASE_URL}/llamada/respuesta`,
+    method: "POST",
+    language: "es-MX",
+    speechTimeout: "3",
+    speechModel: "phone_call",
+    timeout: 10,
+  });
+}
+
 // ── LLAMADA ENTRANTE ──
 router.post("/llamada/entrante", (req, res) => {
   const telefono = req.body.From || "desconocido";
@@ -33,16 +45,7 @@ router.post("/llamada/entrante", (req, res) => {
   const twilio = getTwilio();
   const twiml = new twilio.twiml.VoiceResponse();
 
-  const gather = twiml.gather({
-    input: "speech",
-    action: `${process.env.BASE_URL}/llamada/respuesta`,
-    method: "POST",
-    language: "es-MX",
-    speechTimeout: "auto",
-    speechModel: "phone_call",
-    // enhanced: false — modelo estándar más económico
-  });
-
+  const gather = crearGather(twiml);
   gather.say(
     { language: "es-MX", voice: "Polly.Mia-Neural" },
     textoASSML("Bienvenido a Mr. Sushi, ¿en qué te puedo ayudar?", "medium")
@@ -67,14 +70,7 @@ router.post("/llamada/respuesta", async (req, res) => {
   const twiml = new twilio.twiml.VoiceResponse();
 
   if (!textoCliente || textoCliente.trim() === "") {
-    const gather = twiml.gather({
-      input: "speech",
-      action: `${process.env.BASE_URL}/llamada/respuesta`,
-      method: "POST",
-      language: "es-MX",
-      speechTimeout: "auto",
-      speechModel: "phone_call",
-    });
+    const gather = crearGather(twiml);
     gather.say(
       { language: "es-MX", voice: "Polly.Mia-Neural" },
       textoASSML("No te escuché bien. ¿Me puedes repetir?", "medium")
@@ -90,15 +86,7 @@ router.post("/llamada/respuesta", async (req, res) => {
     const textoRespuesta = limpiarTexto(resultado.texto);
     logger.info(`Respuesta: "${textoRespuesta}"`);
 
-    const gather = twiml.gather({
-      input: "speech",
-      action: `${process.env.BASE_URL}/llamada/respuesta`,
-      method: "POST",
-      language: "es-MX",
-      speechTimeout: "auto",
-      speechModel: "phone_call",
-    });
-
+    const gather = crearGather(twiml);
     gather.say(
       { language: "es-MX", voice: "Polly.Mia-Neural" },
       `<speak><prosody rate="medium">${textoRespuesta}</prosody></speak>`
