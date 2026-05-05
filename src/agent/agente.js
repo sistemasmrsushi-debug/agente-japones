@@ -20,34 +20,47 @@ function buildSystemPrompt() {
   const sucursalesTexto = restaurante.sucursales
     .map(s => `  - ${s.nombre} (${s.zona}): ${s.direccion}`).join("\n");
 
-  return `Eres el asistente virtual de ${restaurante.nombre}, un restaurante japonés con sucursales en CDMX y Estado de México.
+  return `Eres el asistente virtual de ${restaurante.nombre}, restaurante japonés con sucursales en CDMX y Estado de México.
 
-Tu personalidad:
-- Amable, profesional y eficiente
-- Hablas en español mexicano natural
-- Eres inteligente y recuerdas TODO lo que el cliente ya te dijo en la conversación
-- NUNCA repites preguntas que el cliente ya respondió
+PERSONALIDAD:
+- Amable, profesional y eficiente en español mexicano natural
+- NUNCA repites preguntas ya respondidas
 - NUNCA sugieres productos que el cliente NO pidió
+- Recuerdas TODO lo que el cliente dijo en la conversación
 
-Tus capacidades:
-1. TOMAR PEDIDOS:
-   - Registra EXACTAMENTE lo que el cliente pide
-   - Pregunta si es para RECOGER EN SUCURSAL o a DOMICILIO — solo UNA vez
-   - Si ya lo dijo, NO vuelvas a preguntar
-   - Si es domicilio y ya dio dirección, NO la vuelvas a pedir
-   - Si ya tienes: productos + tipo de entrega + dirección o sucursal → registra el pedido inmediatamente
-2. RESERVACIONES: Recopila nombre, fecha, hora, personas y sucursal — sin repetir datos ya dados.
-3. CONSULTAR MENÚ: Describe platillos y precios si el cliente pregunta.
-4. SOPORTE: Atiende quejas con empatía. Escala a gerente si es grave.
+CAPACIDADES:
+1. TOMAR PEDIDOS — REGLA CRÍTICA:
+   Cuando el cliente confirme su pedido (diga "sí", "eso es todo", "confirmo", "listo", "de acuerdo", "llego directo", etc.)
+   DEBES responder OBLIGATORIAMENTE con este JSON exacto y nada más:
+   {"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"nombre exacto","precio":0,"cantidad":1}],"tipo":"sucursal","sucursal":"nombre sucursal"}}
+   
+   Para domicilio:
+   {"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"nombre exacto","precio":0,"cantidad":1}],"tipo":"domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"domicilio"}}
+
+   IMPORTANTE: El JSON debe ir AL INICIO de tu respuesta, antes de cualquier texto.
+
+2. RESERVACIONES — cuando el cliente confirme:
+   {"accion":"REGISTRAR_RESERVACION","reservacion":{"nombre":"...","fecha":"...","hora":"...","personas":0,"sucursal":"..."}}
+
+3. ESCALAR A HUMANO:
+   {"accion":"ESCALAR_HUMANO","motivo":"..."}
+
+4. CONSULTAS — responde normalmente con texto.
+
+FLUJO DE PEDIDO:
+1. Cliente pide productos → confirmas lo que pidió y preguntas si es para recoger o domicilio
+2. Cliente dice sucursal o domicilio → si domicilio pides dirección
+3. Cliente confirma → GENERAS EL JSON INMEDIATAMENTE
+4. NO preguntes "¿deseas confirmar?" — si el cliente ya dijo que sí, registra el pedido
 
 Horario: ${restaurante.horario}
 
-SERVICIO A DOMICILIO:
+DOMICILIO:
 - Envío GRATIS a cualquier dirección
-- Tiempo estimado: 40 minutos
+- Tiempo: 40 minutos
 - Sin restricciones de zona
 
-MENÚ COMPLETO:
+MENÚ:
 ${menuTexto}
 
 SUCURSALES:
@@ -56,21 +69,7 @@ ${sucursalesTexto}
 POLÍTICAS:
 - Reservaciones: ${restaurante.politicas.reservaciones}
 - Cancelaciones: ${restaurante.politicas.cancelaciones}
-- Tiempo en sucursal: ${restaurante.politicas.tiempo_espera_pedido}
-
-REGLAS MUY IMPORTANTES:
-- Lee TODA la conversación antes de responder
-- Si el cliente ya respondió algo, NO lo vuelvas a preguntar
-- Si ya tienes toda la info necesaria, confirma y registra el pedido YA
-- NUNCA inventes platillos o sucursales que no existan
-- Si pide algo que no tenemos, díselo amablemente
-- Para pedidos a DOMICILIO usa este JSON exacto:
-  {"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"...","precio":0,"cantidad":0}],"tipo":"domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"domicilio"}}
-- Para pedidos en SUCURSAL:
-  {"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"...","precio":0,"cantidad":0}],"tipo":"sucursal","sucursal":"..."}}
-- Al confirmar reservación: {"accion":"REGISTRAR_RESERVACION","reservacion":{"nombre":"...","fecha":"...","hora":"...","personas":0,"sucursal":"..."}}
-- Al escalar: {"accion":"ESCALAR_HUMANO","motivo":"..."}
-- Consultas normales: solo texto, sin JSON`;
+- Tiempo espera: ${restaurante.politicas.tiempo_espera_pedido}`;
 }
 
 async function procesarMensaje(historial, mensajeNuevo) {
@@ -90,6 +89,7 @@ async function procesarMensaje(historial, mensajeNuevo) {
     });
 
     const textoRespuesta = response.choices[0].message.content;
+    logger.info(`Respuesta Groq: ${textoRespuesta.substring(0, 100)}`);
     const accion = detectarAccion(textoRespuesta);
 
     return {
@@ -110,30 +110,36 @@ async function procesarMensaje(historial, mensajeNuevo) {
 
 function detectarAccion(texto) {
   try {
-    const jsonMatch = texto.match(/\{[\s\S]*"accion"[\s\S]*\}/);
+    const jsonMatch = texto.match(/\{[\s\S]*?"accion"[\s\S]*?\}/);
     if (!jsonMatch) return null;
     const datos = JSON.parse(jsonMatch[0]);
+    if (!datos.accion) return null;
+
     const mensajesCliente = {
       REGISTRAR_PEDIDO:      generarConfirmacionPedido(datos.pedido),
       REGISTRAR_RESERVACION: generarConfirmacionReservacion(datos.reservacion),
       ESCALAR_HUMANO:        `Entiendo tu situación. Un gerente se comunicará contigo en menos de 30 minutos. ¡Gracias por tu paciencia! 🙏`,
     };
+
     return {
       tipo: datos.accion,
       datos,
       mensajeCliente: mensajesCliente[datos.accion] || texto.replace(jsonMatch[0], "").trim(),
     };
-  } catch { return null; }
+  } catch(e) {
+    logger.error("Error detectando acción: " + e.message);
+    return null;
+  }
 }
 
 function generarConfirmacionPedido(pedido) {
   if (!pedido || !pedido.items) return "¡Tu pedido ha sido registrado! En breve te confirmamos.";
 
-  const lista = pedido.items.map(i => `• ${i.cantidad}x ${i.nombre} - $${i.precio * i.cantidad}`).join("\n");
-  const total = pedido.items.reduce((sum, i) => sum + i.precio * i.cantidad, 0);
+  const lista = pedido.items.map(i => `• ${i.cantidad || 1}x ${i.nombre} - $${(i.precio || 0) * (i.cantidad || 1)}`).join("\n");
+  const total = pedido.items.reduce((sum, i) => sum + (i.precio || 0) * (i.cantidad || 1), 0);
 
   if (pedido.tipo === "domicilio") {
-    return `✅ ¡Pedido a domicilio confirmado!\n\n${lista}\n\nTotal: $${total} MXN\n🚚 Envío: GRATIS\n⏱ Tiempo estimado: 40 minutos\n📍 ${pedido.direccion || ""}, ${pedido.colonia || ""}\n📝 Referencias: ${pedido.referencias || "Sin referencias"}\n\n¡Gracias! 🍣`;
+    return `✅ ¡Pedido a domicilio confirmado!\n\n${lista}\n\nTotal: $${total} MXN\n🚚 Envío: GRATIS\n⏱ Tiempo estimado: 40 minutos\n📍 ${pedido.direccion || ""}, ${pedido.colonia || ""}\n📝 Referencias: ${pedido.referencias || "Sin referencias"}\n\n¡Gracias por tu pedido! 🍣`;
   }
 
   return `✅ ¡Pedido confirmado para recoger!\n\n${lista}\n\nTotal: $${total} MXN\n⏱ Tiempo: ${restaurante.politicas.tiempo_espera_pedido}\n📍 Sucursal: ${pedido.sucursal || "Por confirmar"}\n\n¡Te esperamos! 🍣`;
