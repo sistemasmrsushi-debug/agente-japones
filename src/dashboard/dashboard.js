@@ -9,12 +9,35 @@ const PEDIDOS_FILE       = path.join(__dirname, "../../data/pedidos.json");
 const RESERVACIONES_FILE = path.join(__dirname, "../../data/reservaciones.json");
 
 const USUARIOS = {
-  "arboledas":       { password: "mrsushi01", sucursal: "Arboledas",           rol: "sucursal" },
-  "lomasverdes":     { password: "mrsushi02", sucursal: "Lomas Verdes",        rol: "sucursal" },
-  "atizapan":        { password: "mrsushi03", sucursal: "Atizapán",            rol: "sucursal" },
-  "fuentessatelite": { password: "mrsushi04", sucursal: "Fuentes de Satélite", rol: "sucursal" },
-  "zonaazul":        { password: "mrsushi05", sucursal: "Zona Azul Domicilio", rol: "sucursal" },
-  "gerente":         { password: "gerente2024", sucursal: null,                rol: "gerente"  },
+  // ── RESTAURANTES ──
+  "vallejo":           { password: "mrsushi01", sucursal: "Vallejo",               rol: "sucursal" },
+  "zonaesmeralda":     { password: "mrsushi02", sucursal: "Zona Esmeralda",        rol: "sucursal" },
+  "arboledas":         { password: "mrsushi03", sucursal: "Arboledas",             rol: "sucursal" },
+  "zonaazulrest":      { password: "mrsushi05", sucursal: "Zona Azul Restaurante", rol: "sucursal" },
+  "mundoe":            { password: "mrsushi06", sucursal: "Mundo E",               rol: "sucursal" },
+  "fuentessatelite":   { password: "mrsushi11", sucursal: "Fuentes de Satélite",   rol: "sucursal" },
+  "patriotismo":       { password: "mrsushi12", sucursal: "Patriotismo",           rol: "sucursal" },
+  "hahhaazul":         { password: "mrsushi13", sucursal: "Hahha Azul",            rol: "sucursal" },
+  "masaryk":           { password: "mrsushi14", sucursal: "Masaryk",               rol: "sucursal" },
+  "americana":         { password: "mrsushi15", sucursal: "Americana",             rol: "sucursal" },
+  "tecamachalco":      { password: "mrsushi16", sucursal: "Tecamachalco",          rol: "sucursal" },
+  "galeriasmetepec":   { password: "mrsushi19", sucursal: "Galerías Metepec",      rol: "sucursal" },
+  "galeriasserdan":    { password: "mrsushi22", sucursal: "Galerías Serdán",       rol: "sucursal" },
+  "urbancenter":       { password: "mrsushi23", sucursal: "Urban Center",          rol: "sucursal" },
+  "hahhaesmeralda":    { password: "mrsushi24", sucursal: "Hahha Esmeralda",       rol: "sucursal" },
+  "patiosantafe":      { password: "mrsushi25", sucursal: "Patio Santa Fe",        rol: "sucursal" },
+  // ── FAST FOOD ──
+  "atizapan":          { password: "mrsushi04", sucursal: "Atizapán",              rol: "sucursal" },
+  "zonaazuldom":       { password: "mrsushi07", sucursal: "Zona Azul Domicilio",   rol: "sucursal" },
+  "perisur":           { password: "mrsushi08", sucursal: "Perisur",               rol: "sucursal" },
+  "lomasverdes":       { password: "mrsushi09", sucursal: "Lomas Verdes",          rol: "sucursal" },
+  "delta":             { password: "mrsushi10", sucursal: "Delta",                 rol: "sucursal" },
+  "coapa":             { password: "mrsushi17", sucursal: "Coapa",                 rol: "sucursal" },
+  "galeriástoluca":    { password: "mrsushi18", sucursal: "Galerías Toluca",       rol: "sucursal" },
+  "galeriascuernavaca":{ password: "mrsushi20", sucursal: "Galerías Cuernavaca",   rol: "sucursal" },
+  "ccsantafe":         { password: "mrsushi21", sucursal: "CC Santa Fe",           rol: "sucursal" },
+  // ── GERENTES ──
+  "gerente":           { password: "gerente2024", sucursal: null,                  rol: "gerente"  },
 };
 
 function leer(ruta) {
@@ -44,10 +67,10 @@ async function notificarCliente(telefono, mensaje) {
     if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) return;
     let dest = telefono.startsWith("whatsapp:") ? telefono : `whatsapp:${telefono}`;
     const client = require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    await client.messages.create({ from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`, to: dest, body: mensaje });
+    await client.messages.create({ from:`whatsapp:${process.env.TWILIO_PHONE_NUMBER}`, to:dest, body:mensaje });
     logger.info(`Notificación enviada a ${telefono}`);
   } catch (error) {
-    logger.error(`Error notificando a ${telefono}: ` + error.message);
+    logger.error(`Error notificando: ` + error.message);
   }
 }
 
@@ -55,7 +78,7 @@ router.post("/api/login", (req, res) => {
   const { usuario, password } = req.body;
   const user = USUARIOS[usuario?.toLowerCase()];
   if (!user || user.password !== password) return res.status(401).json({ error: "Usuario o contraseña incorrectos" });
-  res.json({ ok: true, rol: user.rol, sucursal: user.sucursal, usuario });
+  res.json({ ok:true, rol:user.rol, sucursal:user.sucursal, usuario });
 });
 
 router.get("/api/pedidos", (req, res) => {
@@ -101,8 +124,9 @@ router.patch("/api/reservaciones/:id/estado", (req, res) => {
 router.get("/api/stats", (req, res) => {
   const pedidos = leer(PEDIDOS_FILE);
   const hoy = new Date().toDateString();
-  const sucursales = ["Arboledas","Lomas Verdes","Atizapán","Fuentes de Satélite","Zona Azul Domicilio"];
-  res.json(sucursales.map(s => ({
+  const sucursales = Object.values(USUARIOS).filter(u => u.rol === "sucursal").map(u => u.sucursal);
+  const unicas = [...new Set(sucursales)];
+  res.json(unicas.map(s => ({
     sucursal: s,
     total:      pedidos.filter(p => (p.sucursal||"").includes(s)).length,
     hoy:        pedidos.filter(p => (p.sucursal||"").includes(s) && new Date(p.fecha).toDateString() === hoy).length,
