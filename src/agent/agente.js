@@ -24,13 +24,11 @@ function getPromocionesSucursal(sucursal) {
   return [...generales, ...(sucursal.promociones_propias || []).filter(filtrar)];
 }
 
-// Lista de sucursales en una sola línea compacta — sin horarios/promos aquí
+// Solo nombres — sin horarios ni promos. Mucho más liviano.
 function listaSucursalesCorta() {
-  return restaurante.sucursales.map(s => `${s.nombre}(${s.zona})`).join(", ");
+  return restaurante.sucursales.map(s => s.nombre).join(", ");
 }
 
-// Menú compacto: nombre y precio en una sola línea por categoría, separados por "·"
-// Esto reduce drásticamente el tamaño del prompt vs. una línea por platillo
 function menuCompacto() {
   return Object.entries(restaurante.menu)
     .map(([categoria, items]) => {
@@ -40,14 +38,30 @@ function menuCompacto() {
     .join("\n");
 }
 
-function buildSystemPrompt() {
+// Detecta si el mensaje del cliente menciona una sucursal específica,
+// para solo entonces incluir su horario/promo en el prompt (bajo demanda).
+function detectarSucursalMencionada(mensaje) {
+  const texto = mensaje.toLowerCase();
+  return restaurante.sucursales.find(s => texto.includes(s.nombre.toLowerCase()));
+}
+
+function buildSystemPrompt(sucursalRelevante) {
+  let bloqueHorario = "";
+  if (sucursalRelevante) {
+    const promos = getPromocionesSucursal(sucursalRelevante);
+    const promosTexto = promos.length > 0 ? promos.map(p => `${p.nombre} (${(p.dias||[]).join(",")} ${p.hora_inicio||""}-${p.hora_fin||""})`).join(", ") : "ninguna activa";
+    bloqueHorario = `\nHORARIO Y PROMOS DE "${sucursalRelevante.nombre}": ${getHorarioSucursal(sucursalRelevante)} | Promos: ${promosTexto}`;
+  } else {
+    bloqueHorario = `\nHorario general del restaurante: ${Object.entries(restaurante.horario_general).map(([d,h])=>`${d.slice(0,3)} ${h.abre}-${h.cierra}`).join(", ")}. Si preguntan por el horario de UNA sucursal específica y no la mencionaron antes, pídeles que digan cuál.`;
+  }
+
   return `Eres el asistente virtual de ${restaurante.nombre}, restaurante japonés. Responde breve y directo.
 
 REGLAS:
 1. Lee TODA la conversación. Si el cliente ya respondió algo, NO lo preguntes de nuevo.
 2. "sucursales" = lugares físicos (lista SUCURSALES). "menú/platillos/rollos" = comida (lista MENÚ). No mezcles.
-3. El menú está dividido en categorías entre corchetes [Categoría]. Cada platillo SOLO pertenece a la categoría donde aparece. No muevas platillos entre categorías aunque el texto se parezca.
-4. Al listar una categoría, enumera TODOS sus platillos salvo que pidan "ejemplos".
+3. El menú está dividido en categorías entre corchetes [Categoría]. Cada platillo SOLO pertenece a la categoría donde aparece. No muevas platillos entre categorías.
+4. Al listar una categoría completa, enumera TODOS sus platillos salvo que pidan "ejemplos".
 5. Flujo de pedido: pides productos → preguntas UNA VEZ recoger o domicilio → si falta sucursal/dirección la pides UNA VEZ → registras inmediatamente sin pedir confirmación extra.
 
 REGISTRAR — etiquetas ocultas al final del mensaje:
@@ -59,13 +73,7 @@ Escalar: [ESCALAR]{"accion":"ESCALAR_HUMANO","motivo":"..."}[/ESCALAR]
 DOMICILIO: Envío GRATIS · 40 min · Sin restricciones de zona
 
 SUCURSALES: ${listaSucursalesCorta()}
-
-HORARIOS Y PROMOS POR SUCURSAL:
-${restaurante.sucursales.map(s => {
-  const promos = getPromocionesSucursal(s);
-  const promosTexto = promos.length > 0 ? promos.map(p => p.nombre).join(",") : "ninguna";
-  return `${s.nombre}: ${getHorarioSucursal(s)} | promos: ${promosTexto}`;
-}).join("\n")}
+${bloqueHorario}
 
 MENÚ (cada categoría es exclusiva, no mezclar):
 ${menuCompacto()}
@@ -73,9 +81,7 @@ ${menuCompacto()}
 POLÍTICAS: ${restaurante.politicas.reservaciones} ${restaurante.politicas.cancelaciones} Tiempo espera: ${restaurante.politicas.tiempo_espera_pedido}`;
 }
 
-// Limita el historial enviado a Groq para acelerar respuestas en conversaciones largas.
-// Mantiene los últimos N turnos (pares usuario+asistente).
-function limitarHistorial(historial, maxTurnos = 8) {
+function limitarHistorial(historial, maxTurnos = 6) {
   const maxMensajes = maxTurnos * 2;
   if (historial.length <= maxMensajes) return historial;
   return historial.slice(historial.length - maxMensajes);
@@ -86,14 +92,18 @@ async function procesarMensaje(historial, mensajeNuevo) {
     const groq = getGroq();
     const historialLimitado = limitarHistorial(historial);
 
+    // Busca si el mensaje actual o reciente menciona una sucursal específica
+    const textoReciente = [mensajeNuevo, ...historialLimitado.slice(-4).map(m => m.content)].join(" ");
+    const sucursalRelevante = detectarSucursalMencionada(textoReciente);
+
     const response = await groq.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages: [
-        { role: "system", content: buildSystemPrompt() },
+        { role: "system", content: buildSystemPrompt(sucursalRelevante) },
         ...historialLimitado.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })),
         { role: "user", content: mensajeNuevo },
       ],
-      max_tokens: 1500,
+      max_tokens: 1200,
       temperature: 0.1,
     });
 
@@ -109,8 +119,6 @@ async function procesarMensaje(historial, mensajeNuevo) {
       texto: textoLimpio,
       accion: accion?.tipo || null,
       datos: accion?.datos || null,
-      // Guardamos el historial COMPLETO en cache (no el limitado),
-      // el límite solo aplica a lo que se manda a Groq en cada llamada
       historialActualizado: [...historial, { role:"user", content:mensajeNuevo }, { role:"assistant", content:textoRespuesta }],
     };
   } catch (error) {
