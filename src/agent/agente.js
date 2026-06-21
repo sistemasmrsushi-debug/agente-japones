@@ -24,30 +24,30 @@ function getPromocionesSucursal(sucursal) {
   return [...generales, ...(sucursal.promociones_propias || []).filter(filtrar)];
 }
 
+// Lista corta y plana de sucursales — solo nombre, zona y dirección breve
+function listaSucursalesCorta() {
+  return restaurante.sucursales
+    .map(s => `${s.nombre} (${s.zona})`)
+    .join(", ");
+}
+
 function buildSystemPrompt() {
   const menuTexto = Object.entries(restaurante.menu)
-    .map(([cat, items]) => `${cat}:\n${items.map(i => `  - ${i.nombre}: $${i.precio} - ${i.descripcion}`).join("\n")}`)
-    .join("\n\n");
-
-  const sucursalesTexto = restaurante.sucursales.map(s => {
-    const promos = getPromocionesSucursal(s);
-    const promosTexto = promos.length > 0
-      ? promos.map(p => `    🎉 ${p.nombre}: ${p.descripcion} · ${(p.dias||[]).join(", ")} ${p.hora_inicio||""}–${p.hora_fin||""} · ${p.vigencia === "hasta_nuevo_aviso" ? "hasta nuevo aviso" : `hasta ${p.vigencia}`}`).join("\n")
-      : "    Sin promociones activas";
-    return `  - ${s.nombre} [${s.tipo.toUpperCase()}] · ${s.zona}\n    Dir: ${s.direccion}\n    Horario: ${getHorarioSucursal(s)}\n    Promociones:\n${promosTexto}`;
-  }).join("\n\n");
+    .map(([cat, items]) => `${cat}: ${items.map(i => `${i.nombre} $${i.precio}`).join(", ")}`)
+    .join("\n");
 
   return `Eres el asistente virtual de ${restaurante.nombre}, restaurante japonés.
 
-PERSONALIDAD: Amable, profesional, español mexicano natural.
-REGLA #1: Lee TODA la conversación. Si el cliente ya respondió algo, NO lo vuelvas a preguntar JAMÁS.
+REGLA #1 — MÁS IMPORTANTE:
+Lee TODA la conversación. Si el cliente ya respondió algo, NO lo vuelvas a preguntar JAMÁS.
 
-TIPOS DE SUCURSAL:
-- RESTAURANTE: Aplican todas las promociones incluyendo barra libre
-- FAST_FOOD: NO aplican promociones de restaurante
+REGLA #2 — NO CONFUNDIR CATEGORÍAS:
+Hay dos listas totalmente distintas en este prompt: SUCURSALES (lugares físicos donde recoger pedido) y MENÚ (platillos de comida).
+Si el cliente pregunta "¿qué sucursales tienen?" o "¿en qué sucursales hay?" responde SOLO con nombres de lugares de la lista SUCURSALES, nunca con platillos.
+Si el cliente pregunta "¿qué tienen de comer?" o "¿qué rollos hay?" responde SOLO con platillos de la lista MENÚ, nunca con sucursales.
 
 FLUJO DE PEDIDO:
-1. Cliente pide → confirmas y preguntas UNA VEZ: ¿recoger o domicilio?
+1. Cliente pide productos → confirmas y preguntas UNA VEZ: ¿recoger o domicilio?
 2. Recoger → preguntas sucursal (si no la dijo) → REGISTRAS
 3. Domicilio → pides dirección UNA VEZ → REGISTRAS
 4. NUNCA preguntes "¿confirmas?" — registra cuando tengas todos los datos
@@ -60,9 +60,21 @@ Escalar: [ESCALAR]{"accion":"ESCALAR_HUMANO","motivo":"..."}[/ESCALAR]
 
 DOMICILIO: Envío GRATIS · 40 min · Sin restricciones
 
-MENÚ:\n${menuTexto}
+=== LISTA DE SUCURSALES (lugares físicos) ===
+${listaSucursalesCorta()}
 
-SUCURSALES:\n${sucursalesTexto}
+Si el cliente pide horario o promoción de una sucursal específica, usa esta info detallada:
+${restaurante.sucursales.map(s => {
+  const promos = getPromocionesSucursal(s);
+  const promosTexto = promos.length > 0 ? promos.map(p => p.nombre).join(", ") : "ninguna";
+  return `- ${s.nombre}: horario ${getHorarioSucursal(s)} · promos: ${promosTexto}`;
+}).join("\n")}
+
+=== FIN LISTA DE SUCURSALES ===
+
+=== LISTA DE MENÚ (platillos de comida) ===
+${menuTexto}
+=== FIN LISTA DE MENÚ ===
 
 POLÍTICAS:
 - ${restaurante.politicas.reservaciones}
