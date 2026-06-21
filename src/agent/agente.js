@@ -24,7 +24,6 @@ function getPromocionesSucursal(sucursal) {
   return [...generales, ...(sucursal.promociones_propias || []).filter(filtrar)];
 }
 
-// Solo nombres — sin horarios ni promos. Mucho más liviano.
 function listaSucursalesCorta() {
   return restaurante.sucursales.map(s => s.nombre).join(", ");
 }
@@ -38,8 +37,6 @@ function menuCompacto() {
     .join("\n");
 }
 
-// Detecta si el mensaje del cliente menciona una sucursal específica,
-// para solo entonces incluir su horario/promo en el prompt (bajo demanda).
 function detectarSucursalMencionada(mensaje) {
   const texto = mensaje.toLowerCase();
   return restaurante.sucursales.find(s => texto.includes(s.nombre.toLowerCase()));
@@ -52,19 +49,25 @@ function buildSystemPrompt(sucursalRelevante) {
     const promosTexto = promos.length > 0 ? promos.map(p => `${p.nombre} (${(p.dias||[]).join(",")} ${p.hora_inicio||""}-${p.hora_fin||""})`).join(", ") : "ninguna activa";
     bloqueHorario = `\nHORARIO Y PROMOS DE "${sucursalRelevante.nombre}": ${getHorarioSucursal(sucursalRelevante)} | Promos: ${promosTexto}`;
   } else {
-    bloqueHorario = `\nHorario general del restaurante: ${Object.entries(restaurante.horario_general).map(([d,h])=>`${d.slice(0,3)} ${h.abre}-${h.cierra}`).join(", ")}. Si preguntan por el horario de UNA sucursal específica y no la mencionaron antes, pídeles que digan cuál.`;
+    bloqueHorario = `\nHorario general: ${Object.entries(restaurante.horario_general).map(([d,h])=>`${d.slice(0,3)} ${h.abre}-${h.cierra}`).join(", ")}.`;
   }
 
-  return `Eres el asistente virtual de ${restaurante.nombre}, restaurante japonés. Responde breve y directo.
+  return `Eres el asistente virtual de ${restaurante.nombre}, restaurante japonés. Responde breve, directo, y SIEMPRE con una respuesta completa en texto natural — nunca dejes un mensaje vacío o solo con una palabra como "Sucursal:".
 
 REGLAS:
 1. Lee TODA la conversación. Si el cliente ya respondió algo, NO lo preguntes de nuevo.
-2. "sucursales" = lugares físicos (lista SUCURSALES). "menú/platillos/rollos" = comida (lista MENÚ). No mezcles.
-3. El menú está dividido en categorías entre corchetes [Categoría]. Cada platillo SOLO pertenece a la categoría donde aparece. No muevas platillos entre categorías.
+2. "sucursales" = lugares físicos. "menú/platillos/rollos" = comida. No mezcles.
+3. El menú está dividido en categorías entre corchetes [Categoría]. Cada platillo SOLO pertenece a su categoría, no las mezcles.
 4. Al listar una categoría completa, enumera TODOS sus platillos salvo que pidan "ejemplos".
-5. Flujo de pedido: pides productos → preguntas UNA VEZ recoger o domicilio → si falta sucursal/dirección la pides UNA VEZ → registras inmediatamente sin pedir confirmación extra.
 
-REGISTRAR — etiquetas ocultas al final del mensaje:
+FLUJO DE PEDIDO — sigue estos pasos EXACTOS, en orden, sin saltarte ninguno:
+Paso A: Cliente menciona productos → confirmas qué pidió con precios y preguntas: "¿Lo quieres recoger en sucursal o que te lo enviemos a domicilio?"
+Paso B1: Si responde "sucursal" o "recoger" → preguntas: "¿En cuál sucursal?" (si no la dijo ya)
+Paso B2: Si responde "domicilio" o "a mi casa" → respondes con una frase completa como: "¡Perfecto! ¿Cuál es tu dirección completa, colonia y alguna referencia para la entrega?"
+Paso C: Cuando el cliente da la sucursal (B1) o la dirección completa (B2) → en ese mismo mensaje generas la confirmación final con TODOS los datos del pedido y la etiqueta [PEDIDO]. Nunca generes la etiqueta antes de tener tipo + sucursal/dirección.
+IMPORTANTE: nunca respondas solo "Sucursal:" ni dejes una respuesta a medias. Siempre da una oración completa.
+
+REGISTRAR — etiquetas ocultas al final del mensaje (el cliente NO las ve):
 Sucursal: [PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"...","precio":0,"cantidad":1}],"tipo":"sucursal","sucursal":"..."}}[/PEDIDO]
 Domicilio: [PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"...","precio":0,"cantidad":1}],"tipo":"domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"domicilio"}}[/PEDIDO]
 Reservación: [RESERVACION]{"accion":"REGISTRAR_RESERVACION","reservacion":{"nombre":"...","fecha":"...","hora":"...","personas":0,"sucursal":"..."}}[/RESERVACION]
@@ -91,8 +94,6 @@ async function procesarMensaje(historial, mensajeNuevo) {
   try {
     const groq = getGroq();
     const historialLimitado = limitarHistorial(historial);
-
-    // Busca si el mensaje actual o reciente menciona una sucursal específica
     const textoReciente = [mensajeNuevo, ...historialLimitado.slice(-4).map(m => m.content)].join(" ");
     const sucursalRelevante = detectarSucursalMencionada(textoReciente);
 
@@ -107,13 +108,20 @@ async function procesarMensaje(historial, mensajeNuevo) {
       temperature: 0.1,
     });
 
-    const textoRespuesta = response.choices[0].message.content;
+    let textoRespuesta = response.choices[0].message.content;
     const accion = detectarAccion(textoRespuesta);
-    const textoLimpio = textoRespuesta
+    let textoLimpio = textoRespuesta
       .replace(/\[PEDIDO\][\s\S]*?\[\/PEDIDO\]/g, "")
       .replace(/\[RESERVACION\][\s\S]*?\[\/RESERVACION\]/g, "")
       .replace(/\[ESCALAR\][\s\S]*?\[\/ESCALAR\]/g, "")
       .trim();
+
+    // Salvaguarda: si el texto quedó vacío o es solo una etiqueta huérfana
+    // (ej. "Sucursal:"), generamos un mensaje de respaldo en vez de mandar vacío.
+    if (!textoLimpio || textoLimpio.length < 3 || /^sucursal:?$/i.test(textoLimpio)) {
+      logger.warn(`Respuesta vacía o inválida detectada, usando fallback. Original: "${textoRespuesta}"`);
+      textoLimpio = "¿Me puedes confirmar de nuevo tu pedido? Quiero asegurarme de registrarlo correctamente. 🍣";
+    }
 
     return {
       texto: textoLimpio,
