@@ -24,90 +24,76 @@ function getPromocionesSucursal(sucursal) {
   return [...generales, ...(sucursal.promociones_propias || []).filter(filtrar)];
 }
 
+// Lista de sucursales en una sola línea compacta — sin horarios/promos aquí
 function listaSucursalesCorta() {
-  return restaurante.sucursales.map(s => `${s.nombre} (${s.zona})`).join(", ");
+  return restaurante.sucursales.map(s => `${s.nombre}(${s.zona})`).join(", ");
 }
 
-// Menú: cada categoría con su propio encabezado MUY explícito,
-// SOLO el nombre y precio del platillo (sin descripción) para minimizar
-// confusión del modelo y bajar tamaño del prompt.
-function menuDetallado() {
+// Menú compacto: nombre y precio en una sola línea por categoría, separados por "·"
+// Esto reduce drásticamente el tamaño del prompt vs. una línea por platillo
+function menuCompacto() {
   return Object.entries(restaurante.menu)
     .map(([categoria, items]) => {
-      const lista = items.map(i => `   • ${i.nombre} — $${i.precio}`).join("\n");
-      return `>>> CATEGORÍA: "${categoria}" (contiene EXACTAMENTE estos ${items.length} platillos, ningún otro) <<<\n${lista}`;
+      const lista = items.map(i => `${i.nombre} $${i.precio}`).join(" · ");
+      return `[${categoria}] (${items.length}): ${lista}`;
     })
-    .join("\n\n");
+    .join("\n");
 }
 
 function buildSystemPrompt() {
-  return `Eres el asistente virtual de ${restaurante.nombre}, restaurante japonés.
+  return `Eres el asistente virtual de ${restaurante.nombre}, restaurante japonés. Responde breve y directo.
 
-REGLA #1 — MÁS IMPORTANTE:
-Lee TODA la conversación. Si el cliente ya respondió algo, NO lo vuelvas a preguntar JAMÁS.
+REGLAS:
+1. Lee TODA la conversación. Si el cliente ya respondió algo, NO lo preguntes de nuevo.
+2. "sucursales" = lugares físicos (lista SUCURSALES). "menú/platillos/rollos" = comida (lista MENÚ). No mezcles.
+3. El menú está dividido en categorías entre corchetes [Categoría]. Cada platillo SOLO pertenece a la categoría donde aparece. No muevas platillos entre categorías aunque el texto se parezca.
+4. Al listar una categoría, enumera TODOS sus platillos salvo que pidan "ejemplos".
+5. Flujo de pedido: pides productos → preguntas UNA VEZ recoger o domicilio → si falta sucursal/dirección la pides UNA VEZ → registras inmediatamente sin pedir confirmación extra.
 
-REGLA #2 — NO CONFUNDIR SUCURSALES CON MENÚ:
-"¿qué sucursales tienen?" → responde con lugares de la lista SUCURSALES.
-"¿qué tienen de comer?" → responde con platillos de la lista MENÚ.
-
-REGLA #3 — RESPETA LAS CATEGORÍAS EXACTAS DEL MENÚ, NO LAS MEZCLES:
-El menú está dividido en categorías estrictas marcadas con ">>> CATEGORÍA: nombre <<<".
-Cada platillo pertenece SOLO a la categoría donde aparece listado. NUNCA muevas un platillo a otra categoría.
-Ejemplos de mapeo correcto:
-- Si el cliente pregunta por "rollos" o "rollos tradicionales" → usa SOLO los platillos que están dentro de la categoría "Rollos Tradicionales". NO incluyas nada de "Sushi Box", "Combos" ni "Sushi 2x1" aunque su descripción mencione la palabra "rollos".
-- Si pregunta por "rollos especiales" o "especialidades" → usa SOLO la categoría "Rollos Especialidades".
-- Si pregunta por "combos" o "charolas para compartir" → usa SOLO "Sushi Box" y "Combos".
-- La palabra "rollos" puede aparecer en descripciones de otras categorías (ej. Sushi Box dice "6 Rollos en Charola") pero eso NO los convierte en parte de "Rollos Tradicionales".
-
-REGLA #4 — LISTAS COMPLETAS:
-Cuando enumeres una categoría, enumera TODOS sus platillos, no solo algunos, a menos que el cliente pida "unos ejemplos".
-
-FLUJO DE PEDIDO:
-1. Cliente pide productos → confirmas y preguntas UNA VEZ: ¿recoger o domicilio?
-2. Recoger → preguntas sucursal (si no la dijo) → REGISTRAS
-3. Domicilio → pides dirección UNA VEZ → REGISTRAS
-4. NUNCA preguntes "¿confirmas?" — registra cuando tengas todos los datos
-
-REGISTRAR — etiquetas ocultas al final de tu mensaje:
+REGISTRAR — etiquetas ocultas al final del mensaje:
 Sucursal: [PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"...","precio":0,"cantidad":1}],"tipo":"sucursal","sucursal":"..."}}[/PEDIDO]
 Domicilio: [PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"...","precio":0,"cantidad":1}],"tipo":"domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"domicilio"}}[/PEDIDO]
 Reservación: [RESERVACION]{"accion":"REGISTRAR_RESERVACION","reservacion":{"nombre":"...","fecha":"...","hora":"...","personas":0,"sucursal":"..."}}[/RESERVACION]
 Escalar: [ESCALAR]{"accion":"ESCALAR_HUMANO","motivo":"..."}[/ESCALAR]
 
-DOMICILIO: Envío GRATIS · 40 min · Sin restricciones
+DOMICILIO: Envío GRATIS · 40 min · Sin restricciones de zona
 
-=== LISTA DE SUCURSALES (lugares físicos) ===
-${listaSucursalesCorta()}
+SUCURSALES: ${listaSucursalesCorta()}
 
-Horarios y promociones por sucursal:
+HORARIOS Y PROMOS POR SUCURSAL:
 ${restaurante.sucursales.map(s => {
   const promos = getPromocionesSucursal(s);
-  const promosTexto = promos.length > 0 ? promos.map(p => p.nombre).join(", ") : "ninguna";
-  return `- ${s.nombre}: horario ${getHorarioSucursal(s)} · promos: ${promosTexto}`;
+  const promosTexto = promos.length > 0 ? promos.map(p => p.nombre).join(",") : "ninguna";
+  return `${s.nombre}: ${getHorarioSucursal(s)} | promos: ${promosTexto}`;
 }).join("\n")}
-=== FIN LISTA DE SUCURSALES ===
 
-=== MENÚ COMPLETO POR CATEGORÍAS EXACTAS ===
-${menuDetallado()}
-=== FIN MENÚ ===
+MENÚ (cada categoría es exclusiva, no mezclar):
+${menuCompacto()}
 
-POLÍTICAS:
-- ${restaurante.politicas.reservaciones}
-- ${restaurante.politicas.cancelaciones}
-- Tiempo espera: ${restaurante.politicas.tiempo_espera_pedido}`;
+POLÍTICAS: ${restaurante.politicas.reservaciones} ${restaurante.politicas.cancelaciones} Tiempo espera: ${restaurante.politicas.tiempo_espera_pedido}`;
+}
+
+// Limita el historial enviado a Groq para acelerar respuestas en conversaciones largas.
+// Mantiene los últimos N turnos (pares usuario+asistente).
+function limitarHistorial(historial, maxTurnos = 8) {
+  const maxMensajes = maxTurnos * 2;
+  if (historial.length <= maxMensajes) return historial;
+  return historial.slice(historial.length - maxMensajes);
 }
 
 async function procesarMensaje(historial, mensajeNuevo) {
   try {
     const groq = getGroq();
+    const historialLimitado = limitarHistorial(historial);
+
     const response = await groq.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages: [
         { role: "system", content: buildSystemPrompt() },
-        ...historial.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })),
+        ...historialLimitado.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })),
         { role: "user", content: mensajeNuevo },
       ],
-      max_tokens: 2048,
+      max_tokens: 1500,
       temperature: 0.1,
     });
 
@@ -123,6 +109,8 @@ async function procesarMensaje(historial, mensajeNuevo) {
       texto: textoLimpio,
       accion: accion?.tipo || null,
       datos: accion?.datos || null,
+      // Guardamos el historial COMPLETO en cache (no el limitado),
+      // el límite solo aplica a lo que se manda a Groq en cada llamada
       historialActualizado: [...historial, { role:"user", content:mensajeNuevo }, { role:"assistant", content:textoRespuesta }],
     };
   } catch (error) {
