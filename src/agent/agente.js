@@ -28,12 +28,14 @@ function listaSucursalesCorta() {
   return restaurante.sucursales.map(s => `${s.nombre} (${s.zona})`).join(", ");
 }
 
-// Menú con cada platillo en su propia línea, agrupado por categoría
+// Menú: cada categoría con su propio encabezado MUY explícito,
+// SOLO el nombre y precio del platillo (sin descripción) para minimizar
+// confusión del modelo y bajar tamaño del prompt.
 function menuDetallado() {
   return Object.entries(restaurante.menu)
     .map(([categoria, items]) => {
-      const lista = items.map(i => `  - ${i.nombre}: $${i.precio}`).join("\n");
-      return `${categoria.toUpperCase()} (${items.length} opciones):\n${lista}`;
+      const lista = items.map(i => `   • ${i.nombre} — $${i.precio}`).join("\n");
+      return `>>> CATEGORÍA: "${categoria}" (contiene EXACTAMENTE estos ${items.length} platillos, ningún otro) <<<\n${lista}`;
     })
     .join("\n\n");
 }
@@ -44,13 +46,21 @@ function buildSystemPrompt() {
 REGLA #1 — MÁS IMPORTANTE:
 Lee TODA la conversación. Si el cliente ya respondió algo, NO lo vuelvas a preguntar JAMÁS.
 
-REGLA #2 — NO CONFUNDIR CATEGORÍAS:
-Hay dos listas totalmente distintas: SUCURSALES (lugares físicos) y MENÚ (platillos de comida).
+REGLA #2 — NO CONFUNDIR SUCURSALES CON MENÚ:
 "¿qué sucursales tienen?" → responde con lugares de la lista SUCURSALES.
-"¿qué tienen de comer?" o "¿qué rollos hay?" → responde con platillos de la lista MENÚ.
+"¿qué tienen de comer?" → responde con platillos de la lista MENÚ.
 
-REGLA #3 — LISTAS COMPLETAS:
-Cuando el cliente pregunte qué rollos, platillos o productos de una categoría hay, DEBES enumerar TODOS los que aparecen en esa categoría del MENÚ, no solo algunos. Por ejemplo si pregunta "qué rollos tienen" debes listar TODOS los rollos de las categorías "Rollos Tradicionales", "Rollos Especialidades" y "Sushi 2x1" — son más de 40 en total. No resumas ni acortes la lista a menos que el cliente pida solo "unos ejemplos" o "recomendación".
+REGLA #3 — RESPETA LAS CATEGORÍAS EXACTAS DEL MENÚ, NO LAS MEZCLES:
+El menú está dividido en categorías estrictas marcadas con ">>> CATEGORÍA: nombre <<<".
+Cada platillo pertenece SOLO a la categoría donde aparece listado. NUNCA muevas un platillo a otra categoría.
+Ejemplos de mapeo correcto:
+- Si el cliente pregunta por "rollos" o "rollos tradicionales" → usa SOLO los platillos que están dentro de la categoría "Rollos Tradicionales". NO incluyas nada de "Sushi Box", "Combos" ni "Sushi 2x1" aunque su descripción mencione la palabra "rollos".
+- Si pregunta por "rollos especiales" o "especialidades" → usa SOLO la categoría "Rollos Especialidades".
+- Si pregunta por "combos" o "charolas para compartir" → usa SOLO "Sushi Box" y "Combos".
+- La palabra "rollos" puede aparecer en descripciones de otras categorías (ej. Sushi Box dice "6 Rollos en Charola") pero eso NO los convierte en parte de "Rollos Tradicionales".
+
+REGLA #4 — LISTAS COMPLETAS:
+Cuando enumeres una categoría, enumera TODOS sus platillos, no solo algunos, a menos que el cliente pida "unos ejemplos".
 
 FLUJO DE PEDIDO:
 1. Cliente pide productos → confirmas y preguntas UNA VEZ: ¿recoger o domicilio?
@@ -77,7 +87,7 @@ ${restaurante.sucursales.map(s => {
 }).join("\n")}
 === FIN LISTA DE SUCURSALES ===
 
-=== MENÚ COMPLETO (platillos de comida) ===
+=== MENÚ COMPLETO POR CATEGORÍAS EXACTAS ===
 ${menuDetallado()}
 === FIN MENÚ ===
 
