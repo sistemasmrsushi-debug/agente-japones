@@ -47,8 +47,8 @@ function promocionesTexto() {
       return `🍹 COCTELERÍA 2x1 — Paga 1 lleva 2 · Lun–Sáb 13:00–22:30 / Dom 13:00–22:00 · Solo restaurante/híbrido, NO Fast Food.`;
     }
     if (p.nombre === "Lunch Box") {
-      const o = p.opciones;
-      return `🥡 LUNCH BOX — $${p.precio} · Lun–Jue todo el día · Restaurante y Fast Food.\n   Elige: 1 entrada (${o.entrada.join(" / ")}) + 1 arroz (${o.arroz.join(" / ")}) + 1 rollo (${o.rollo.join(" / ")}) + 1 agua (${o.agua.join(" / ")}). Solo 1 por categoría, extras se cobran aparte.`;
+      const opciones = p.opciones;
+      return `🥡 LUNCH BOX — $${p.precio} · Lun–Jue todo el día · Restaurante y Fast Food.\n   Elige: 1 entrada (${opciones.entrada.join(" / ")}) + 1 arroz (${opciones.arroz.join(" / ")}) + 1 rollo (${opciones.rollo.join(" / ")}) + 1 agua (${opciones.agua.join(" / ")}). Solo 1 por categoría, extras se cobran aparte.`;
     }
     if (p.nombre === "Mr. 4x4") {
       return `🔲 MR. 4x4 — Elige 4 medios rollos · $${p.precio_normal} todos los días / $${p.precio_martes} solo los martes · Restaurante y Fast Food.`;
@@ -57,33 +57,12 @@ function promocionesTexto() {
   }).join("\n");
 }
 
-// ============================================================
-// DETECCIÓN DE SUCURSAL MÁS CERCANA POR ZONA
-// ============================================================
-function detectarSucursalPorZona(direccion) {
-  if (!direccion) return null;
-  const texto = direccion.toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-
-  const zonas = restaurante.zonas_domicilio || [];
-  for (const zona of zonas) {
-    for (const keyword of zona.keywords) {
-      const kw = keyword.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      if (texto.includes(kw)) {
-        logger.info(`Zona detectada: "${keyword}" → Sucursal: ${zona.sucursal}`);
-        return zona.sucursal;
-      }
-    }
-  }
-  return null;
-}
-
 function detectarSucursalMencionada(mensaje) {
   const texto = mensaje.toLowerCase();
   return restaurante.sucursales.find(s => texto.includes(s.nombre.toLowerCase()));
 }
 
-function buildSystemPrompt(sucursalRelevante, zonaSugerida) {
+function buildSystemPrompt(sucursalRelevante) {
   let bloqueHorario = "";
   if (sucursalRelevante) {
     const promos = getPromocionesSucursal(sucursalRelevante);
@@ -95,11 +74,6 @@ function buildSystemPrompt(sucursalRelevante, zonaSugerida) {
     bloqueHorario = `\nHorario general: ${Object.entries(restaurante.horario_general).map(([d,h])=>`${d.slice(0,3)} ${h.abre}-${h.cierra}`).join(", ")}.`;
   }
 
-  const listaSucursales = restaurante.sucursales.map(s => s.nombre).join(", ");
-  const bloqueZona = zonaSugerida
-    ? `\n[ZONA DETECTADA]: La dirección del cliente corresponde a la zona de "${zonaSugerida}". En el Paso C sugiere esta sucursal.`
-    : "";
-
   return `Eres el asistente virtual de ${restaurante.nombre}, restaurante japonés. Responde breve, directo, y SIEMPRE con una respuesta completa en texto natural — nunca dejes un mensaje vacío o solo con una palabra como "Sucursal:".
 
 REGLAS:
@@ -108,21 +82,16 @@ REGLAS:
 3. El menú está dividido en categorías entre corchetes [Categoría]. Cada platillo SOLO pertenece a su categoría, no las mezcles.
 4. Al listar una categoría completa, enumera TODOS sus platillos salvo que pidan "ejemplos".
 
-FLUJO DE PEDIDO — sigue estos pasos EXACTOS, en orden:
+FLUJO DE PEDIDO — sigue estos pasos EXACTOS, en orden, sin saltarte ninguno:
 Paso A: Cliente menciona productos → confirmas qué pidió con precios y preguntas: "¿Lo quieres recoger en sucursal o que te lo enviemos a domicilio?"
 Paso B1: Si responde "sucursal" o "recoger" → preguntas: "¿En cuál sucursal?" (si no la dijo ya)
-Paso B2: Si responde "domicilio" → preguntas: "¿Cuál es tu dirección completa, colonia y alguna referencia?"
-Paso C — DOMICILIO: Cuando tienes la dirección del cliente:
-  - Si hay ZONA DETECTADA → propones esa sucursal: "¡Perfecto! La sucursal más cercana a tu zona es *[SUCURSAL]*. ¿Te enviamos desde ahí o prefieres otra?"
-  - Si no hay zona detectada → preguntas: "¿Cuál sucursal prefieres que te envíe? Tenemos: ${listaSucursales}"
-  - Cuando el cliente confirma sucursal → generas confirmación final con etiqueta [PEDIDO] incluyendo el nombre de la sucursal asignada.
-Paso C — SUCURSAL: Cuando el cliente da la sucursal → generas confirmación final con [PEDIDO].
-IMPORTANTE: nunca respondas solo "Sucursal:" ni dejes respuesta a medias. Siempre da una oración completa.
-${bloqueZona}
+Paso B2: Si responde "domicilio" o "a mi casa" → respondes con una frase completa como: "¡Perfecto! ¿Cuál es tu dirección completa, colonia y alguna referencia para la entrega?"
+Paso C: Cuando el cliente da la sucursal (B1) o la dirección completa (B2) → en ese mismo mensaje generas la confirmación final con TODOS los datos del pedido y la etiqueta [PEDIDO]. Nunca generes la etiqueta antes de tener tipo + sucursal/dirección.
+IMPORTANTE: nunca respondas solo "Sucursal:" ni dejes una respuesta a medias. Siempre da una oración completa.
 
 REGISTRAR — etiquetas ocultas al final del mensaje (el cliente NO las ve):
 Sucursal: [PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"...","precio":0,"cantidad":1}],"tipo":"sucursal","sucursal":"..."}}[/PEDIDO]
-Domicilio: [PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"...","precio":0,"cantidad":1}],"tipo":"domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"[NOMBRE SUCURSAL ASIGNADA]"}}[/PEDIDO]
+Domicilio: [PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"...","precio":0,"cantidad":1}],"tipo":"domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"domicilio"}}[/PEDIDO]
 Reservación: [RESERVACION]{"accion":"REGISTRAR_RESERVACION","reservacion":{"nombre":"...","fecha":"...","hora":"...","personas":0,"sucursal":"..."}}[/RESERVACION]
 Escalar: [ESCALAR]{"accion":"ESCALAR_HUMANO","motivo":"..."}[/ESCALAR]
 
@@ -160,12 +129,11 @@ async function procesarMensaje(historial, mensajeNuevo) {
     const historialLimitado = limitarHistorial(historial);
     const textoReciente = [mensajeNuevo, ...historialLimitado.slice(-4).map(m => m.content)].join(" ");
     const sucursalRelevante = detectarSucursalMencionada(textoReciente);
-    const zonaSugerida = detectarSucursalPorZona(textoReciente);
 
     const response = await groq.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages: [
-        { role: "system", content: buildSystemPrompt(sucursalRelevante, zonaSugerida) },
+        { role: "system", content: buildSystemPrompt(sucursalRelevante) },
         ...historialLimitado.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })),
         { role: "user", content: mensajeNuevo },
       ],
@@ -181,6 +149,7 @@ async function procesarMensaje(historial, mensajeNuevo) {
       .replace(/\[ESCALAR\][\s\S]*?\[\/ESCALAR\]/g, "")
       .trim();
 
+    // Salvaguarda: si el texto quedó vacío o es solo una etiqueta huérfana
     if (!textoLimpio || textoLimpio.length < 3 || /^sucursal:?$/i.test(textoLimpio)) {
       logger.warn(`Respuesta vacía o inválida detectada, usando fallback. Original: "${textoRespuesta}"`);
       textoLimpio = "¿Me puedes confirmar de nuevo tu pedido? Quiero asegurarme de registrarlo correctamente. 🍣";
@@ -208,4 +177,4 @@ function detectarAccion(texto) {
   } catch(e) { return null; }
 }
 
-module.exports = { procesarMensaje, detectarSucursalPorZona };
+module.exports = { procesarMensaje };
