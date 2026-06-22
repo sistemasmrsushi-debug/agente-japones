@@ -7,34 +7,26 @@ function getGroq() {
   return new Groq({ apiKey: process.env.GROQ_API_KEY });
 }
 
-// ── MENU ──────────────────────────────────────────────────────────────────────
-// Menu resumido para el prompt base (ahorra ~600 tokens)
-function menuResumido() {
+// ── INDICE DE PLATILLOS ───────────────────────────────────────────────────────
+// Busqueda exacta por nombre en el menu real — precios siempre correctos
+function buscarPlatillo(nombre) {
+  const t = nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  for (const [cat, items] of Object.entries(restaurante.menu)) {
+    for (const item of items) {
+      const k = item.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (k === t || k.includes(t) || t.includes(k)) {
+        return { ...item, categoria: cat };
+      }
+    }
+  }
+  return null;
+}
+
+// Construye menu compacto con precios reales para el prompt
+function menuCompacto() {
   return Object.entries(restaurante.menu)
-    .map(([cat, items]) => {
-      const precios = items.map(i => i.precio);
-      const min = Math.min(...precios);
-      const max = Math.max(...precios);
-      return `[${cat}] ${items.length} opciones $${min}-$${max}`;
-    }).join("\n");
-}
-
-// Menu completo de una categoria especifica (se manda solo si el cliente pregunta)
-function menuCategoria(nombreCategoria) {
-  const cat = Object.entries(restaurante.menu).find(([k]) =>
-    k.toLowerCase().includes(nombreCategoria.toLowerCase())
-  );
-  if (!cat) return null;
-  return cat[1].map(i => `${i.nombre} $${i.precio}`).join("\n");
-}
-
-// Detectar si el cliente pregunta por una categoria especifica
-function detectarCategoriaPreguntada(mensaje) {
-  const texto = mensaje.toLowerCase();
-  return Object.keys(restaurante.menu).find(cat =>
-    texto.includes(cat.toLowerCase()) ||
-    texto.includes(cat.toLowerCase().replace(" ", ""))
-  ) || null;
+    .map(([cat, items]) => `[${cat}]: ${items.map(i => `${i.nombre} $${i.precio}`).join(" | ")}`)
+    .join("\n");
 }
 
 // ── ZONA DOMICILIO ────────────────────────────────────────────────────────────
@@ -62,9 +54,8 @@ function listaSucursalesCorta() {
   return restaurante.sucursales.map(s => s.nombre).join(", ");
 }
 
-// ── SYSTEM PROMPT OPTIMIZADO ──────────────────────────────────────────────────
-function buildSystemPrompt(sucursalRelevante, zonaSugerida, categoriaDetectada) {
-  // Bloque de horario solo si hay sucursal relevante
+// ── SYSTEM PROMPT ─────────────────────────────────────────────────────────────
+function buildSystemPrompt(sucursalRelevante) {
   let bloqueHorario = "";
   if (sucursalRelevante) {
     const horario = sucursalRelevante.horario_propio || restaurante.horario_general;
@@ -72,49 +63,41 @@ function buildSystemPrompt(sucursalRelevante, zonaSugerida, categoriaDetectada) 
     bloqueHorario = `\nHORARIO ${sucursalRelevante.nombre}: ${h}`;
   }
 
-  // Bloque de zona detectada
-  const bloqueZona = zonaSugerida
-    ? `\n[ZONA]: Direccion del cliente corresponde a "${zonaSugerida}". Sugiere esta sucursal.`
-    : "";
+  return `Eres el asistente de Mr. Sushi. Responde SIEMPRE en espanol, breve y natural. NUNCA muestres etiquetas al cliente.
 
-  // Menu: resumido por default, completo si pregunta categoria especifica
-  const bloqueMenu = categoriaDetectada
-    ? `MENU COMPLETO [${categoriaDetectada}]:\n${menuCategoria(categoriaDetectada)}\n\nOTRAS CATEGORIAS (resumido):\n${menuResumido()}`
-    : `MENU (resumido — si cliente pide detalles de categoria, listalos todos):\n${menuResumido()}`;
+FLUJO ESTRICTO — sigue este orden SIN saltarte pasos:
+1. SALUDO: pregunta "Que te gustaria pedir?"
+2. PRODUCTOS: cuando el cliente mencione platillos, confirma SOLO nombre y precio exacto del menu. Pregunta: "Lo quieres recoger en sucursal o te lo enviamos a domicilio?"
+3. TIPO: 
+   - Si dice SUCURSAL -> pregunta cual sucursal
+   - Si dice DOMICILIO -> pregunta "Cual es tu direccion completa, colonia y referencia?" NO sugieras sucursal todavia.
+4. DIRECCION: cuando el cliente de su direccion -> di "Un momento, busco la sucursal mas cercana a tu zona."
+5. SUCURSAL: el sistema detectara la zona automaticamente.
+6. CONFIRMAR: cuando cliente confirme sucursal -> genera etiqueta [PEDIDO] con datos completos.
 
-  const listaSucursales = listaSucursalesCorta();
+REGLAS CRITICAS:
+- NUNCA sugieras sucursal sin tener la direccion del cliente primero
+- NUNCA inventes precios — usa EXACTAMENTE los precios del menu
+- NUNCA mezcles categorias — cada platillo pertenece a UNA categoria
+- Si el cliente menciona algo que no esta en el menu, dile que no lo tienes
 
-  return `Eres el asistente de Mr. Sushi. Responde breve y natural. NUNCA muestres etiquetas al cliente.
+ETIQUETAS (invisibles, solo al final del mensaje):
+[PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"NOMBRE_EXACTO_DEL_MENU","precio":PRECIO_EXACTO,"cantidad":1}],"tipo":"sucursal|domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"..."}}[/PEDIDO]
+[RESERVACION]{"accion":"REGISTRAR_RESERVACION","reservacion":{"nombre":"...","fecha":"...","hora":"...","personas":0,"sucursal":"..."}}[/RESERVACION]
+[ESCALAR]{"accion":"ESCALAR_HUMANO","motivo":"..."}[/ESCALAR]
 
-SALUDO: Si el cliente saluda o dice "quiero hacer un pedido", pregunta directamente: "Claro! Que te gustaría pedir?"
-
-FLUJO PEDIDO:
-A) Cliente menciona productos -> confirma con precios y pregunta: "Lo quieres recoger en sucursal o te lo enviamos a domicilio?"
-B1) Sucursal -> pregunta cual (si no la dijo ya)
-B2) Domicilio -> pide direccion completa
-C) Con direccion -> sugiere sucursal: "La sucursal mas cercana es [X]. Te enviamos desde ahi o prefieres otra?"
-D) Cliente confirma sucursal -> genera INMEDIATAMENTE el [PEDIDO] con resumen: items, total, sucursal, direccion e ID. NO preguntes nada mas antes de generar el [PEDIDO].
-CRITICO: NO generes [PEDIDO] hasta tener: productos + tipo + sucursal confirmada + direccion (si domicilio).
-CRITICO: Una vez que el cliente confirma la sucursal, genera el [PEDIDO] en ESE MISMO mensaje sin hacer preguntas adicionales.
-${bloqueZona}
-
-ETIQUETAS (invisibles al cliente, solo al final):
-Sucursal:[PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"...","precio":0,"cantidad":1}],"tipo":"sucursal","sucursal":"..."}}[/PEDIDO]
-Domicilio:[PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"...","precio":0,"cantidad":1}],"tipo":"domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"SUCURSAL_ASIGNADA"}}[/PEDIDO]
-Reservacion:[RESERVACION]{"accion":"REGISTRAR_RESERVACION","reservacion":{"nombre":"...","fecha":"...","hora":"...","personas":0,"sucursal":"..."}}[/RESERVACION]
-Escalar:[ESCALAR]{"accion":"ESCALAR_HUMANO","motivo":"..."}[/ESCALAR]
-
-DOMICILIO: Gratis | 40 min | Sin restricciones
-SUCURSALES: ${listaSucursales}
+DOMICILIO: Gratis | 40 min | Sin restricciones de zona
+SUCURSALES: ${listaSucursalesCorta()}
 ${bloqueHorario}
 
-${bloqueMenu}
+MENU COMPLETO (precios exactos, no los cambies):
+${menuCompacto()}
 
-POLITICAS: Reservaciones min 2hrs antes, max 20 personas. Cancelacion sin cargo hasta 1hr antes. Espera 30-40 min.
+POLITICAS: Reservaciones min 2hrs antes, max 20 personas. Cancelacion sin cargo hasta 1hr antes.
 FACTURACION: "Para factura llama al 56 1109 7461 con RFC, Razon Social, CP fiscal y Regimen Fiscal."`;
 }
 
-function limitarHistorial(historial, maxTurnos = 4) {
+function limitarHistorial(historial, maxTurnos = 5) {
   const max = maxTurnos * 2;
   return historial.length <= max ? historial : historial.slice(-max);
 }
@@ -124,45 +107,51 @@ async function procesarMensaje(historial, mensajeNuevo) {
     const groq = getGroq();
     const historialLimitado = limitarHistorial(historial);
     const textoReciente = [mensajeNuevo, ...historialLimitado.slice(-2).map(m => m.content)].join(" ");
-
     const sucursalRelevante = detectarSucursalMencionada(textoReciente);
-    const zonaSugerida = detectarSucursalPorZona(textoReciente);
-    const categoriaDetectada = detectarCategoriaPreguntada(mensajeNuevo);
 
     const response = await groq.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages: [
-        { role: "system", content: buildSystemPrompt(sucursalRelevante, zonaSugerida, categoriaDetectada) },
+        { role: "system", content: buildSystemPrompt(sucursalRelevante) },
         ...historialLimitado.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })),
         { role: "user", content: mensajeNuevo },
       ],
-      max_tokens: 600,  // reducido de 1200 — respuestas mas cortas = mas rapido
+      max_tokens: 800,
       temperature: 0.1,
     });
 
     let textoRespuesta = response.choices[0].message.content;
     const accion = detectarAccion(textoRespuesta);
+
+    // Corregir precios en la accion usando el indice real
+    if (accion && accion.datos?.pedido?.items) {
+      accion.datos.pedido.items = accion.datos.pedido.items.map(item => {
+        const encontrado = buscarPlatillo(item.nombre);
+        if (encontrado) {
+          return { nombre: encontrado.nombre, precio: encontrado.precio, cantidad: item.cantidad || 1 };
+        }
+        return item;
+      });
+    }
+
     let textoLimpio = textoRespuesta
       .replace(/\[PEDIDO\][\s\S]*?\[\/PEDIDO\]/gi, "")
       .replace(/\[RESERVACION\][\s\S]*?\[\/RESERVACION\]/gi, "")
       .replace(/\[ESCALAR\][\s\S]*?\[\/ESCALAR\]/gi, "")
-      .replace(/\[ZONA\][\s\S]*?\n/gi, "")
       .trim();
 
-    if (!textoLimpio || textoLimpio.length < 3 || /^sucursal:?$/i.test(textoLimpio)) {
-      textoLimpio = "Me puedes confirmar tu pedido? Quiero asegurarme de registrarlo bien.";
+    if (!textoLimpio || textoLimpio.length < 3) {
+      textoLimpio = "Podrias confirmarme tu pedido? Quiero asegurarme de registrarlo correctamente.";
     }
 
     return {
       texto: textoLimpio,
       accion: accion?.tipo || null,
       datos: accion?.datos || null,
-      sucursalSugerida: zonaSugerida || null,
-      itemsPedido: accion?.datos?.pedido?.items || null,
-      direccionCliente: accion?.datos?.pedido?.direccion || null,
-      coloniaCliente: accion?.datos?.pedido?.colonia || null,
-      referenciasCliente: accion?.datos?.pedido?.referencias || null,
-      historialActualizado: [...historial, { role:"user", content:mensajeNuevo }, { role:"assistant", content:textoRespuesta }],
+      historialActualizado: [...historial,
+        { role: "user", content: mensajeNuevo },
+        { role: "assistant", content: textoRespuesta }
+      ],
     };
   } catch (error) {
     logger.error("Error agente: " + error.message);
@@ -180,4 +169,4 @@ function detectarAccion(texto) {
   } catch(e) { return null; }
 }
 
-module.exports = { procesarMensaje, detectarSucursalPorZona };
+module.exports = { procesarMensaje, detectarSucursalPorZona, buscarPlatillo };
