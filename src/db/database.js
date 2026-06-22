@@ -178,30 +178,29 @@ async function guardarHistorial(telefono, historial) {
 // ── ESTADO DE PEDIDOS EN CURSO ───────────────────────────────────────────────
 
 async function guardarEstadoPedido(telefono, estado) {
-  await pool.query(`
-    INSERT INTO conversaciones (telefono, historial, actualizado)
-    VALUES ($1, $2, NOW())
-    ON CONFLICT (telefono) DO UPDATE SET
-      historial = conversaciones.historial || jsonb_build_object('_estado_pedido', $2::jsonb),
-      actualizado = NOW()
-  `, [telefono + '_estado', JSON.stringify(estado)]);
+  const key = telefono + "_estado";
+  const valor = JSON.stringify(estado);
+  await pool.query(
+    "INSERT INTO conversaciones (telefono, historial, actualizado) VALUES ($1, $2::jsonb, NOW()) ON CONFLICT (telefono) DO UPDATE SET historial = $2::jsonb, actualizado = NOW()",
+    [key, valor]
+  );
 }
 
 async function obtenerEstadoPedido(telefono) {
+  const key = telefono + "_estado";
   const { rows } = await pool.query(
     "SELECT historial FROM conversaciones WHERE telefono=$1",
-    [telefono + '_estado']
+    [key]
   );
   if (!rows[0]) return null;
   try {
-    const data = rows[0].historial;
-    if (data._estado_pedido) return JSON.parse(data._estado_pedido);
-    return data;
+    return rows[0].historial;
   } catch(e) { return null; }
 }
 
 async function eliminarEstadoPedido(telefono) {
-  await pool.query("DELETE FROM conversaciones WHERE telefono=$1", [telefono + '_estado']);
+  const key = telefono + "_estado";
+  await pool.query("DELETE FROM conversaciones WHERE telefono=$1", [key]);
 }
 
 module.exports = {
