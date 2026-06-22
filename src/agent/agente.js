@@ -110,7 +110,9 @@ REGLAS:
 FLUJO DE PEDIDO — pasos EXACTOS en orden, NO te saltes ninguno:
 Paso A: Cliente menciona productos -> confirmas que pidio con precios y preguntas: "Lo quieres recoger en sucursal o te lo enviamos a domicilio?" NO generes [PEDIDO] aqui.
 Paso B1: Si dice "sucursal" o "recoger" -> preguntas: "En cual sucursal?" (si no la dijo ya). NO generes [PEDIDO] aqui.
-Paso B2: Si dice "domicilio" o "a mi casa" -> preguntas SOLO esto: "Cual es tu direccion completa, colonia y alguna referencia?" NO generes [PEDIDO] aqui todavia.
+Paso B2: Si dice "domicilio" (con o sin direccion en el mismo mensaje):
+  - Si el mensaje YA incluye calle, colonia, municipio o CP -> salta directo al Paso C DOMICILIO con esa direccion.
+  - Si NO incluye direccion -> preguntas: "Cual es tu direccion completa, colonia y alguna referencia?" NO generes [PEDIDO] aqui.
 Paso C DOMICILIO: SOLO cuando el cliente ya dio su direccion completa:
   - Si hay ZONA DETECTADA -> dices: "La sucursal mas cercana a tu zona es [SUCURSAL]. Te enviamos desde ahi o prefieres otra?" NO generes [PEDIDO] todavia.
   - Si NO hay zona -> preguntas: "Cual sucursal prefieres que te envie? Tenemos: ${listaSucursales}" NO generes [PEDIDO] todavia.
