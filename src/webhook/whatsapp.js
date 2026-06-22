@@ -183,7 +183,20 @@ router.post("/webhook", async (req, res) => {
 
     if (resultado.accion) {
       await ejecutarAccion(resultado.accion, resultado.datos, telefono);
-      if (resultado.accion === "REGISTRAR_PEDIDO") await db.eliminarEstadoPedido(telefono);
+      if (resultado.accion === "REGISTRAR_PEDIDO") {
+        await db.eliminarEstadoPedido(telefono);
+      }
+    } else if (resultado.sucursalSugerida && resultado.itemsPedido && resultado.itemsPedido.length > 0) {
+      // Agente sugirió sucursal pero aun no confirma — guardar estado
+      await db.guardarEstadoPedido(telefono, {
+        fase: "esperando_confirmacion_sucursal",
+        sucursal_sugerida: resultado.sucursalSugerida,
+        items: resultado.itemsPedido,
+        direccion: resultado.direccionCliente,
+        colonia: resultado.coloniaCliente,
+        referencias: resultado.referenciasCliente,
+      });
+      logger.info(`Estado guardado: ${telefono} -> ${resultado.sucursalSugerida}`);
     }
 
   } catch (error) {
@@ -211,8 +224,6 @@ async function ejecutarAccion(accion, datos, telefono) {
       };
       await db.guardarPedido(pedido);
       logger.info(`Pedido en DB: ${pedido.id} -> ${pedido.sucursal}`);
-      // Notificar ID al cliente
-      await enviarMensaje(telefono, `Tu numero de pedido es: *${pedido.id}*\nPuedes usarlo para consultar el estatus en cualquier momento.`);
       if (pedido.tipo === "domicilio") {
         setTimeout(async () => {
           await enviarMensaje(telefono,
