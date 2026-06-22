@@ -1,57 +1,33 @@
 // src/webhook/whatsapp.js
 const express = require("express");
 const router = express.Router();
-const NodeCache = require("node-cache");
 const { procesarMensaje, detectarSucursalPorZona } = require("../agent/agente");
 const logger = require("../utils/logger");
 const db = require("../db/database");
-
-const estadosPedido = new NodeCache({ stdTTL: 3600 });
 
 function getTwilioClient() {
   return require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 }
 
-// Detecta confirmacion corta del cliente
 function esConfirmacion(texto) {
   const t = texto.toLowerCase().trim()
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const frases = ["si","ahi","esa","ok","dale","listo","adelante","perfecto",
     "ahi esta bien","esa esta bien","de ahi","me parece bien","claro","va",
     "por favor","esta bien","ahi por favor","de esa","bueno","sale","andale",
-    "desde ahi","esa sucursal","si por favor","ok por favor"];
+    "desde ahi","esa sucursal","si por favor","ok por favor","ahi esta",
+    "de esa sucursal","me parece","suena bien","va bien","ahi mismo"];
   return frases.some(f => t === f || t.startsWith(f + " ") || t.endsWith(" " + f));
 }
 
-// Detecta si el mensaje pide domicilio
 function pideDomicilio(texto) {
   const t = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   return /\b(domicilio|a mi casa|a casa|llevar|delivery|me lo llevan|me lo mandan|me traen)\b/.test(t);
 }
 
-// Detecta si el mensaje contiene una direccion
 function tieneDireccion(texto) {
   const t = texto.toLowerCase();
   return /\b(calle|avenida|av[. ]|col[. ]|colonia|blvd|boulevard|calzada|privada|cerrada|circuito|fracc|fraccionamiento|\d{5})\b/.test(t);
-}
-
-// Extrae productos del historial reciente
-function extraerItemsDelHistorial(historial) {
-  // Busca en el ultimo mensaje del asistente los items confirmados
-  for (let i = historial.length - 1; i >= 0; i--) {
-    if (historial[i].role === "assistant") {
-      const texto = historial[i].content;
-      // Busca patron de JSON de pedido en el historial
-      const match = texto.match(/\[PEDIDO\]([\s\S]*?)\[\/PEDIDO\]/i);
-      if (match) {
-        try {
-          const datos = JSON.parse(match[1].trim());
-          return datos.pedido?.items || null;
-        } catch(e) {}
-      }
-    }
-  }
-  return null;
 }
 
 router.post("/webhook", async (req, res) => {
@@ -71,22 +47,31 @@ router.post("/webhook", async (req, res) => {
       return;
     }
 
-    // ── Mensaje de texto ──────────────────────────────────────────────────
     const mensaje = req.body.Body;
     if (!mensaje) return;
     logger.info(`Msg de ${telefono}: ${mensaje.substring(0, 80)}`);
 
-    // ── CASO 1: Confirmacion de sucursal sugerida ─────────────────────────
-    const estado = estadosPedido.get(telefono);
+    // ── CASO 1: Confirmacion de sucursal (estado en DB) ───────────────────
+    const estado = await db.obtenerEstadoPedido(telefono);
     if (estado && estado.fase === "esperando_confirmacion_sucursal" && esConfirmacion(mensaje)) {
       logger.info(`Confirmacion directa: ${telefono} -> ${estado.sucursal_sugerida}`);
+
+      // Si no tenemos items todavia, obtenerlos del historial via Groq rapido
+      let items = estado.items;
+      if (!items || items.length === 0) {
+        const historial = await db.obtenerHistorial(telefono);
+        const resultado = await procesarMensaje(historial, `Confirmo el pedido para enviar a domicilio desde ${estado.sucursal_sugerida}`);
+        await db.guardarHistorial(telefono, resultado.historialActualizado);
+        items = resultado.datos?.pedido?.items || [];
+      }
+
       const pedido = {
         id: `PED-${Date.now()}`,
         fecha: new Date().toISOString(),
         estado: "pendiente",
         telefono_cliente: telefono,
         sucursal: estado.sucursal_sugerida,
-        items: estado.items,
+        items: items,
         tipo: "domicilio",
         direccion: estado.direccion || null,
         colonia: estado.colonia || null,
@@ -94,49 +79,45 @@ router.post("/webhook", async (req, res) => {
         ubicacion_gps: null,
       };
       await db.guardarPedido(pedido);
-      estadosPedido.del(telefono);
-      const total = estado.items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
-      const itemsTexto = estado.items.map(i => `${i.cantidad || 1}x ${i.nombre} ($${i.precio})`).join("\n");
+      await db.eliminarEstadoPedido(telefono);
+
+      const total = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
+      const itemsTexto = items.length > 0
+        ? items.map(i => `${i.cantidad || 1}x ${i.nombre} ($${i.precio})`).join("\n")
+        : "Pedido registrado";
+
       await enviarMensaje(telefono,
         `Perfecto! Tu pedido esta registrado:\n${itemsTexto}\n\nTotal: $${total}\nSucursal: ${estado.sucursal_sugerida}\nDireccion: ${estado.direccion}\n\nTiempo estimado: 40 min. Envio GRATIS!`
       );
       setTimeout(async () => {
         await enviarMensaje(telefono,
-          "Una cosa mas: podrias compartir tu ubicacion por WhatsApp para que la sucursal llegue exactamente a tu puerta? Toca el clip -> Ubicacion -> Enviar mi ubicacion actual. Es opcional."
+          "Una cosa mas: podrias compartir tu ubicacion por WhatsApp para que lleguen exactamente a tu puerta? Toca el clip -> Ubicacion -> Enviar mi ubicacion actual. Es opcional."
         );
       }, 3000);
       return;
     }
 
-    // ── CASO 2: Mensaje tiene domicilio + direccion juntos ────────────────
-    // Resolvemos en codigo sin llamar a Groq para evitar rate limit
+    // ── CASO 2: Domicilio + direccion en mismo mensaje ────────────────────
     if (pideDomicilio(mensaje) && tieneDireccion(mensaje)) {
       const zonaDetectada = detectarSucursalPorZona(mensaje);
       if (zonaDetectada) {
         logger.info(`Domicilio+direccion detectados. Zona: ${zonaDetectada}`);
-        // Guardar estado con la direccion — items se extraen cuando Groq procese el flujo normal
-        // Solo respondemos con la sucursal sugerida, sin segunda llamada a Groq
-        estadosPedido.set(telefono, {
+        const historial = await db.obtenerHistorial(telefono);
+        const resultado = await procesarMensaje(historial, mensaje);
+        await db.guardarHistorial(telefono, resultado.historialActualizado);
+
+        // Guardar estado en DB (persiste reinicios)
+        const items = resultado.datos?.pedido?.items || null;
+        await db.guardarEstadoPedido(telefono, {
           fase: "esperando_confirmacion_sucursal",
           sucursal_sugerida: zonaDetectada,
-          items: null, // se llenara despues
+          items: items,
           direccion: mensaje,
           colonia: null,
           referencias: null,
         });
-        // Llamar a Groq UNA SOLA VEZ para procesar el pedido completo
-        const historial = await db.obtenerHistorial(telefono);
-        const resultado = await procesarMensaje(historial, mensaje);
-        await db.guardarHistorial(telefono, resultado.historialActualizado);
-        // Si Groq extrajo items, guardarlos en el estado
-        if (resultado.datos?.pedido?.items) {
-          const estadoActual = estadosPedido.get(telefono);
-          if (estadoActual) {
-            estadoActual.items = resultado.datos.pedido.items;
-            estadosPedido.set(telefono, estadoActual);
-          }
-        }
-        // Responder con sucursal detectada + lo que dijo Groq
+        logger.info(`Estado guardado en DB para ${telefono}: ${zonaDetectada}, items: ${items ? items.length : 0}`);
+
         await enviarMensaje(telefono,
           `La sucursal mas cercana a tu zona es *${zonaDetectada}*. Te enviamos desde ahi o prefieres otra?`
         );
@@ -149,9 +130,9 @@ router.post("/webhook", async (req, res) => {
     const resultado = await procesarMensaje(historial, mensaje);
     await db.guardarHistorial(telefono, resultado.historialActualizado);
 
-    // Si el agente sugiere sucursal para domicilio -> guardar estado
+    // Si el agente sugiere sucursal para domicilio -> guardar estado en DB
     if (resultado.sucursalSugerida && resultado.itemsPedido) {
-      estadosPedido.set(telefono, {
+      await db.guardarEstadoPedido(telefono, {
         fase: "esperando_confirmacion_sucursal",
         sucursal_sugerida: resultado.sucursalSugerida,
         items: resultado.itemsPedido,
@@ -165,7 +146,7 @@ router.post("/webhook", async (req, res) => {
 
     if (resultado.accion) {
       await ejecutarAccion(resultado.accion, resultado.datos, telefono);
-      if (resultado.accion === "REGISTRAR_PEDIDO") estadosPedido.del(telefono);
+      if (resultado.accion === "REGISTRAR_PEDIDO") await db.eliminarEstadoPedido(telefono);
     }
 
   } catch (error) {

@@ -175,8 +175,40 @@ async function guardarHistorial(telefono, historial) {
   `, [telefono, JSON.stringify(historialLimitado)]);
 }
 
+// ── ESTADO DE PEDIDOS EN CURSO ───────────────────────────────────────────────
+
+async function guardarEstadoPedido(telefono, estado) {
+  await pool.query(`
+    INSERT INTO conversaciones (telefono, historial, actualizado)
+    VALUES ($1, $2, NOW())
+    ON CONFLICT (telefono) DO UPDATE SET
+      historial = conversaciones.historial || jsonb_build_object('_estado_pedido', $2::jsonb),
+      actualizado = NOW()
+  `, [telefono + '_estado', JSON.stringify(estado)]);
+}
+
+async function obtenerEstadoPedido(telefono) {
+  const { rows } = await pool.query(
+    "SELECT historial FROM conversaciones WHERE telefono=$1",
+    [telefono + '_estado']
+  );
+  if (!rows[0]) return null;
+  try {
+    const data = rows[0].historial;
+    if (data._estado_pedido) return JSON.parse(data._estado_pedido);
+    return data;
+  } catch(e) { return null; }
+}
+
+async function eliminarEstadoPedido(telefono) {
+  await pool.query("DELETE FROM conversaciones WHERE telefono=$1", [telefono + '_estado']);
+}
+
 module.exports = {
   initDB,
+  guardarEstadoPedido,
+  obtenerEstadoPedido,
+  eliminarEstadoPedido,
   guardarPedido,
   obtenerPedidos,
   actualizarEstadoPedido,
