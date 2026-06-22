@@ -10,14 +10,15 @@ function getTwilioClient() {
 }
 
 function esConfirmacion(texto) {
-  const t = texto.toLowerCase().trim()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  const frases = ["si","ahi","esa","ok","dale","listo","adelante","perfecto",
-    "ahi esta bien","esa esta bien","de ahi","me parece bien","claro","va",
-    "por favor","esta bien","ahi por favor","de esa","bueno","sale","andale",
-    "desde ahi","esa sucursal","si por favor","ok por favor","ahi esta",
-    "de esa sucursal","me parece","suena bien","va bien","ahi mismo"];
-  return frases.some(f => t === f || t.startsWith(f + " ") || t.endsWith(" " + f));
+  // Detecta confirmacion sin llamar a Groq — regex inteligente
+  const t = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  // Negaciones explicitas
+  if (/\b(no|otra|diferente|cambia|mejor|prefiero otra|ninguna)\b/.test(t)) return false;
+  // Confirmaciones positivas — cualquier mensaje corto con tono afirmativo
+  if (t.length <= 50 && /\b(si|ok|dale|bien|listo|claro|va|esa|ahi|perfecto|correcto|adelante|bueno|sale|andale|orale|sale|chevere|excelente|genial|de una|vamos|esa misma|desde ahi|desde esa|ahi mismo|la misma|ahi esta)\b/.test(t)) return true;
+  // Mensaje muy corto sin negacion = probablemente confirmacion
+  if (t.length <= 20 && !/\b(no|cual|donde|cuando|cuanto|que|como|quien)\b/.test(t)) return true;
+  return false;
 }
 
 function pideDomicilio(texto) {
