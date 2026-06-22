@@ -20,8 +20,111 @@ module.exports = {
   },
 
   // ============================================================
+  // MAPA DE ZONAS PARA ASIGNACIÓN DE DOMICILIO
+  // Cada zona contiene palabras clave que el agente detecta
+  // en la dirección del cliente para asignar la sucursal más cercana
+  // ============================================================
+  zonas_domicilio: [
+    {
+      sucursal: "Masaryk",
+      keywords: ["polanco", "chapultepec", "lomas de chapultepec", "miguel hidalgo", "anzures", "granada", "irrigación", "del bosque", "hipódromo", "condesa", "roma norte", "roma sur", "cuauhtémoc", "doctores", "centro histórico", "tepito", "guerrero", "santa maría la ribera"],
+    },
+    {
+      sucursal: "Vallejo",
+      keywords: ["vallejo", "azcapotzalco", "clavería", "aguilera", "coltongo", "san álvaro", "pasteros", "tlalnepantla cdmx", "industrial vallejo", "pensador mexicano", "lindavista", "gustavo a madero", "indios verdes"],
+    },
+    {
+      sucursal: "Americana",
+      keywords: ["americana", "narvarte oriente", "del valle", "nochebuena", "portales", "iztapalapa", "iztacalco", "benito juárez", "nápoles", "mixcoac", "insurgentes sur"],
+    },
+    {
+      sucursal: "Patriotismo",
+      keywords: ["patriotismo", "san pedro de los pinos", "escandón", "tacubaya", "observatorio", "santa fe cdmx", "álvaro obregón", "axotla", "tlacopac", "florida"],
+    },
+    {
+      sucursal: "Centro Santa Fe",
+      keywords: ["santa fe", "contadero", "cuajimalpa", "zedec", "centro santa fe", "pedregal de san ángel", "pedregal", "san ángel", "loreto", "tizapán"],
+    },
+    {
+      sucursal: "Coapa",
+      keywords: ["coapa", "coyoacán", "tlalpan", "xochimilco", "pedregal de carrasco", "del carmen", "churubusco", "general anaya", "huipulco", "arenal", "tepepan"],
+    },
+    {
+      sucursal: "Delta",
+      keywords: ["delta", "tlalpan", "acoxpa", "pedregal de san nicolás", "san nicolás tetelco", "villa coapa", "fuentes de tepepan", "miguel hidalgo tlalpan"],
+    },
+    {
+      sucursal: "Perisur",
+      keywords: ["perisur", "narvarte", "insurgentes", "extremadura", "actipan", "del valle norte", "acacias", "xoco", "crédito constructor"],
+    },
+    {
+      sucursal: "Hahha Azul",
+      keywords: ["zona azul", "ciudad satélite", "satélite", "naucalpan", "lomas verdes naucalpan", "jardines de satélite", "bosques de satélite", "la florida", "prados del rosario", "san andrés atoto"],
+    },
+    {
+      sucursal: "Zona Azul Restaurante",
+      keywords: ["circumvalación", "circuito satélite", "boulevares", "villa satélite", "rinconada"],
+    },
+    {
+      sucursal: "Fuentes de Satélite",
+      keywords: ["fuentes de satélite", "jardines de satélite", "las fuentes", "bello horizonte", "frac satélite", "tlalnepantla norte"],
+    },
+    {
+      sucursal: "Arboledas",
+      keywords: ["arboledas", "las arboledas", "jiménez", "tlalnepantla", "san lucas tepetlacalco", "san javier", "cuatro vientos", "tlanepantla"],
+    },
+    {
+      sucursal: "Mundo E",
+      keywords: ["mundo e", "tepetlacalco", "san lucas", "acueducto de guadalupe", "barrientos", "tlalnepantla sur", "lechería"],
+    },
+    {
+      sucursal: "Urban Center",
+      keywords: ["urban center", "centro alta", "adolfo lópez mateos", "lago de guadalupe", "cuautitlán izcalli", "tepotzotlán", "tultitlán", "buenavista"],
+    },
+    {
+      sucursal: "Satélite Anexo",
+      keywords: ["tecamachalco", "la herradura", "lomas de tecamachalco", "lomas anahuac", "interlomas", "hacienda de las palmas", "huixquilucan"],
+    },
+    {
+      sucursal: "Tecamachalco",
+      keywords: ["tecamachalco centro", "lomas de chapultepec poniente", "palo solo", "bosque de las lomas", "naucalpan poniente"],
+    },
+    {
+      sucursal: "Hahha Esmeralda",
+      keywords: ["bosque esmeralda", "esmeralda", "atizapán esmeralda", "la palma", "prado esmeralda", "paseos de la herradura"],
+    },
+    {
+      sucursal: "Zona Esmeralda",
+      keywords: ["zona esmeralda", "valdecasas", "la aurora", "san mateo", "villas del sol", "atizapán norte"],
+    },
+    {
+      sucursal: "Lomas Verdes",
+      keywords: ["lomas verdes", "colinas de la gran torre", "bello horizonte atizapán", "villa del real", "rinconada de los alamos", "valle san pedro"],
+    },
+    {
+      sucursal: "Atizapán",
+      keywords: ["atizapán", "ruiz cortínez", "lomas de atizapán", "prado churubusco", "la presa", "la estadía", "las margaritas", "santiago cuautlalpan"],
+    },
+    {
+      sucursal: "Galerías Metepec",
+      keywords: ["metepec", "toluca", "galerías metepec", "san jerónimo chicahualco", "san salvador tizatlali", "conjunto urbano bicentenario"],
+    },
+    {
+      sucursal: "Galerías Toluca",
+      keywords: ["galerías toluca", "toluca centro", "zinacantepec", "almoloya", "san mateo atenco", "lerma", "ocoyoacac"],
+    },
+    {
+      sucursal: "Galerías Serdán",
+      keywords: ["puebla", "serdán", "hermanos serdán", "rancho hermoso", "angelópolis", "cholula", "san andrés cholula"],
+    },
+    {
+      sucursal: "Cuernavaca",
+      keywords: ["cuernavaca", "morelos", "flores magón", "temixco", "jiutepec", "emiliano zapata morelos"],
+    },
+  ],
+
+  // ============================================================
   // PROMOCIONES ACTIVAS 2026
-  // Fuente: PDF "Promociones Activas 2026"
   // ============================================================
   promociones_generales: [
     {
