@@ -33,16 +33,20 @@ function menuCompacto() {
 function detectarSucursalPorZona(texto) {
   if (!texto) return null;
   const t = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  // Buscar el match mas especifico (keyword mas larga gana)
+  let mejorMatch = null;
+  let mejorLongitud = 0;
   for (const zona of (restaurante.zonas_domicilio || [])) {
     for (const keyword of zona.keywords) {
       const kw = keyword.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      if (t.includes(kw)) {
-        logger.info(`Zona: "${keyword}" -> ${zona.sucursal}`);
-        return zona.sucursal;
+      if (t.includes(kw) && kw.length > mejorLongitud) {
+        mejorMatch = zona.sucursal;
+        mejorLongitud = kw.length;
       }
     }
   }
-  return null;
+  if (mejorMatch) logger.info(`Zona detectada: "${mejorMatch}" (${mejorLongitud} chars)`);
+  return mejorMatch;
 }
 
 function detectarSucursalMencionada(mensaje) {

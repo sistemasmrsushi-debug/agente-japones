@@ -79,6 +79,15 @@ router.post("/webhook", async (req, res) => {
     // ── CASO 1: Cliente confirma sucursal sugerida ────────────────────────
     const estado = await db.obtenerEstadoPedido(telefono);
     if (estado?.fase === "esperando_confirmacion_sucursal" && esConfirmacion(mensaje)) {
+      // Verificar si el cliente eligio una sucursal diferente
+      const restaurante = require("../../config/restaurante");
+      const sucursalElegida = restaurante.sucursales.find(s =>
+        mensaje.toLowerCase().includes(s.nombre.toLowerCase())
+      );
+      if (sucursalElegida) {
+        estado.sucursal_sugerida = sucursalElegida.nombre;
+        logger.info(`Cliente eligio sucursal diferente: ${sucursalElegida.nombre}`);
+      }
       logger.info(`Confirmacion: ${telefono} -> ${estado.sucursal_sugerida}`);
 
       // Obtener items con precios reales
