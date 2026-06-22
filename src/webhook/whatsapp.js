@@ -30,6 +30,25 @@ function tieneDireccion(texto) {
   return /\b(calle|avenida|av[. ]|col[. ]|colonia|blvd|boulevard|calzada|privada|cerrada|circuito|fracc|fraccionamiento|\d{5})\b/.test(t);
 }
 
+// Extrae items del historial buscando patrones de precio en texto del asistente
+function extraerItemsDeTexto(historial) {
+  for (let i = historial.length - 1; i >= 0; i--) {
+    if (historial[i].role === "assistant") {
+      const texto = historial[i].content;
+      // Buscar patron: "Nombre cuesta $precio" o "Nombre ($precio)"
+      const matches = [...texto.matchAll(/([A-Za-záéíóúÁÉÍÓÚñÑ\s\.]+?)\s*(?:cuesta|cuestan)?\s*\$\s*(\d+)/g)];
+      if (matches.length > 0) {
+        return matches.map(m => ({
+          nombre: m[1].trim(),
+          precio: parseInt(m[2]),
+          cantidad: 1
+        })).filter(i => i.nombre.length > 3 && i.precio > 0);
+      }
+    }
+  }
+  return [];
+}
+
 router.post("/webhook", async (req, res) => {
   res.set("Content-Type", "text/xml").send("<Response></Response>");
   try {
@@ -56,13 +75,30 @@ router.post("/webhook", async (req, res) => {
     if (estado && estado.fase === "esperando_confirmacion_sucursal" && esConfirmacion(mensaje)) {
       logger.info(`Confirmacion directa: ${telefono} -> ${estado.sucursal_sugerida}`);
 
-      // Si no tenemos items todavia, obtenerlos del historial via Groq rapido
+      // Extraer items del historial sin llamar a Groq
       let items = estado.items;
       if (!items || items.length === 0) {
         const historial = await db.obtenerHistorial(telefono);
-        const resultado = await procesarMensaje(historial, `Confirmo el pedido para enviar a domicilio desde ${estado.sucursal_sugerida}`);
-        await db.guardarHistorial(telefono, resultado.historialActualizado);
-        items = resultado.datos?.pedido?.items || [];
+        // Buscar items en mensajes del asistente en el historial
+        for (let i = historial.length - 1; i >= 0; i--) {
+          if (historial[i].role === "assistant") {
+            const match = historial[i].content.match(/\[PEDIDO\]([\s\S]*?)\[\/PEDIDO\]/i);
+            if (match) {
+              try {
+                const datos = JSON.parse(match[1].trim());
+                if (datos.pedido?.items?.length > 0) {
+                  items = datos.pedido.items;
+                  logger.info(`Items extraidos del historial: ${items.length}`);
+                  break;
+                }
+              } catch(e) {}
+            }
+          }
+        }
+        // Si aun no hay items, buscar en el texto del historial por precios
+        if (!items || items.length === 0) {
+          items = extraerItemsDeTexto(historial);
+        }
       }
 
       const pedido = {
