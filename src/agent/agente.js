@@ -187,10 +187,22 @@ async function procesarMensaje(historial, mensajeNuevo) {
       textoLimpio = "Me puedes confirmar de nuevo tu pedido? Quiero asegurarme de registrarlo correctamente.";
     }
 
+    // Detectar si el agente esta sugiriendo una sucursal para domicilio
+    // para que whatsapp.js pueda guardar el estado y confirmar sin llamar a Groq
+    const sucursalSugerida = zonaSugerida || null;
+    const itemsMatch = accion?.datos?.pedido?.items || null;
+    const dirMatch = textoReciente.match(/avenida|calle|boulevard|privada|cerrada|calzada|carretera/i)
+      ? mensajeNuevo : null;
+
     return {
       texto: textoLimpio,
       accion: accion?.tipo || null,
       datos: accion?.datos || null,
+      sucursalSugerida: sucursalSugerida,
+      itemsPedido: itemsMatch,
+      direccionCliente: accion?.datos?.pedido?.direccion || null,
+      coloniaCliente: accion?.datos?.pedido?.colonia || null,
+      referenciasCliente: accion?.datos?.pedido?.referencias || null,
       historialActualizado: [...historial, { role:"user", content:mensajeNuevo }, { role:"assistant", content:textoRespuesta }],
     };
   } catch (error) {
