@@ -123,7 +123,7 @@ router.post("/webhook", async (req, res) => {
         : "Pedido registrado";
 
       await enviarMensaje(telefono,
-        `Perfecto! Tu pedido esta registrado:\n${itemsTexto}\n\nTotal: $${total}\nSucursal: ${estado.sucursal_sugerida}\nDireccion: ${estado.direccion}\n\nTiempo estimado: 40 min. Envio GRATIS!`
+        `Perfecto! Tu pedido ha sido registrado exitosamente!\n\nID de pedido: ${pedido.id}\n\n${itemsTexto}\n\nTotal: $${total}\nSucursal: ${estado.sucursal_sugerida}\nDireccion: ${estado.direccion}\n\nTiempo estimado: 40 min. Envio GRATIS! Puedes preguntar por el estatus de tu pedido en cualquier momento.`
       );
       setTimeout(async () => {
         await enviarMensaje(telefono,
@@ -210,6 +210,8 @@ async function ejecutarAccion(accion, datos, telefono) {
       };
       await db.guardarPedido(pedido);
       logger.info(`Pedido en DB: ${pedido.id} -> ${pedido.sucursal}`);
+      // Notificar ID al cliente
+      await enviarMensaje(telefono, `Tu numero de pedido es: *${pedido.id}*\nPuedes usarlo para consultar el estatus en cualquier momento.`);
       if (pedido.tipo === "domicilio") {
         setTimeout(async () => {
           await enviarMensaje(telefono,
