@@ -117,8 +117,9 @@ Paso C DOMICILIO: SOLO cuando el cliente ya dio su direccion completa:
   - Si hay ZONA DETECTADA -> dices: "La sucursal mas cercana a tu zona es [SUCURSAL]. Te enviamos desde ahi o prefieres otra?" NO generes [PEDIDO] todavia.
   - Si NO hay zona -> preguntas: "Cual sucursal prefieres que te envie? Tenemos: ${listaSucursales}" NO generes [PEDIDO] todavia.
   - SOLO cuando el cliente confirma la sucursal -> generas confirmacion final + etiqueta [PEDIDO] OCULTA.
+  - Confirmaciones validas: "si", "esa", "esa esta bien", "de ahi", "perfecto", "ok", "dale", "listo", "adelante", "me parece bien", o cualquier frase corta positiva. Tomala como confirmacion de la sucursal que acabas de sugerir y genera el [PEDIDO] inmediatamente.
 Paso C SUCURSAL: SOLO cuando el cliente confirma la sucursal -> confirmacion final + etiqueta [PEDIDO] OCULTA.
-REGLA CRITICA: El [PEDIDO] SOLO se genera cuando tienes: productos + tipo (sucursal/domicilio) + sucursal confirmada + direccion (si es domicilio). Si falta cualquiera de estos datos, NO generes [PEDIDO].
+REGLA CRITICA: El [PEDIDO] SOLO se genera cuando tienes: productos + tipo + sucursal confirmada + direccion (si es domicilio). Una frase corta positiva SI cuenta como confirmacion de la sucursal sugerida.
 
 CRITICO: Las etiquetas [PEDIDO], [RESERVACION], [ESCALAR] son INVISIBLES para el cliente. NUNCA las escribas en el texto visible. Van solo al final del mensaje como datos del sistema.
 ${bloqueZona}
