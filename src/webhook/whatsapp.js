@@ -109,40 +109,37 @@ router.post("/webhook", async (req, res) => {
     }
 
     // ── CASO 2: Mensaje tiene domicilio + direccion juntos ────────────────
-    // Manejamos esto en codigo para no depender de la IA
+    // Resolvemos en codigo sin llamar a Groq para evitar rate limit
     if (pideDomicilio(mensaje) && tieneDireccion(mensaje)) {
       const zonaDetectada = detectarSucursalPorZona(mensaje);
-      const historial = await db.obtenerHistorial(telefono);
-
       if (zonaDetectada) {
         logger.info(`Domicilio+direccion detectados. Zona: ${zonaDetectada}`);
-        // Llamar a Groq para que confirme el pedido y extraiga items
+        // Guardar estado con la direccion — items se extraen cuando Groq procese el flujo normal
+        // Solo respondemos con la sucursal sugerida, sin segunda llamada a Groq
+        estadosPedido.set(telefono, {
+          fase: "esperando_confirmacion_sucursal",
+          sucursal_sugerida: zonaDetectada,
+          items: null, // se llenara despues
+          direccion: mensaje,
+          colonia: null,
+          referencias: null,
+        });
+        // Llamar a Groq UNA SOLA VEZ para procesar el pedido completo
+        const historial = await db.obtenerHistorial(telefono);
         const resultado = await procesarMensaje(historial, mensaje);
         await db.guardarHistorial(telefono, resultado.historialActualizado);
-
-        // Extraer items del resultado si el agente los detectó
-        const items = resultado.datos?.pedido?.items || extraerItemsDelHistorial(resultado.historialActualizado);
-
-        if (items && items.length > 0) {
-          // Guardar estado para confirmacion rapida
-          estadosPedido.set(telefono, {
-            fase: "esperando_confirmacion_sucursal",
-            sucursal_sugerida: zonaDetectada,
-            items: items,
-            direccion: mensaje,
-            colonia: null,
-            referencias: null,
-          });
-          const total = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
-          const itemsTexto = items.map(i => `${i.cantidad || 1}x ${i.nombre} ($${i.precio})`).join("\n");
-          await enviarMensaje(telefono,
-            `${itemsTexto}\n\nTotal: $${total}\n\nLa sucursal mas cercana a tu zona es *${zonaDetectada}*. Te enviamos desde ahi o prefieres otra?`
-          );
-        } else {
-          // No se pudieron extraer items, dejar que Groq maneje
-          await enviarMensaje(telefono, resultado.texto);
-          if (resultado.accion) await ejecutarAccion(resultado.accion, resultado.datos, telefono);
+        // Si Groq extrajo items, guardarlos en el estado
+        if (resultado.datos?.pedido?.items) {
+          const estadoActual = estadosPedido.get(telefono);
+          if (estadoActual) {
+            estadoActual.items = resultado.datos.pedido.items;
+            estadosPedido.set(telefono, estadoActual);
+          }
         }
+        // Responder con sucursal detectada + lo que dijo Groq
+        await enviarMensaje(telefono,
+          `La sucursal mas cercana a tu zona es *${zonaDetectada}*. Te enviamos desde ahi o prefieres otra?`
+        );
         return;
       }
     }
