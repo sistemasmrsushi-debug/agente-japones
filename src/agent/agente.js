@@ -37,6 +37,26 @@ function menuCompacto() {
     .join("\n");
 }
 
+function promocionesTexto() {
+  const promos = restaurante.promociones_generales || [];
+  return promos.map(p => {
+    if (p.nombre === "Barra Libre de Sushi") {
+      return `🍣 BARRA LIBRE DE SUSHI — $${p.precio}/persona · Mié–Sáb 18:00–22:30 · Solo restaurante/híbrido, NO Fast Food ni delivery.`;
+    }
+    if (p.nombre === "Coctelería 2x1") {
+      return `🍹 COCTELERÍA 2x1 — Paga 1 lleva 2 · Lun–Sáb 13:00–22:30 / Dom 13:00–22:00 · Solo restaurante/híbrido, NO Fast Food.`;
+    }
+    if (p.nombre === "Lunch Box") {
+      const opciones = p.opciones;
+      return `🥡 LUNCH BOX — $${p.precio} · Lun–Jue todo el día · Restaurante y Fast Food.\n   Elige: 1 entrada (${opciones.entrada.join(" / ")}) + 1 arroz (${opciones.arroz.join(" / ")}) + 1 rollo (${opciones.rollo.join(" / ")}) + 1 agua (${opciones.agua.join(" / ")}). Solo 1 por categoría, extras se cobran aparte.`;
+    }
+    if (p.nombre === "Mr. 4x4") {
+      return `🔲 MR. 4x4 — Elige 4 medios rollos · $${p.precio_normal} todos los días / $${p.precio_martes} solo los martes · Restaurante y Fast Food.`;
+    }
+    return `${p.nombre}: ${p.descripcion}`;
+  }).join("\n");
+}
+
 function detectarSucursalMencionada(mensaje) {
   const texto = mensaje.toLowerCase();
   return restaurante.sucursales.find(s => texto.includes(s.nombre.toLowerCase()));
@@ -46,7 +66,9 @@ function buildSystemPrompt(sucursalRelevante) {
   let bloqueHorario = "";
   if (sucursalRelevante) {
     const promos = getPromocionesSucursal(sucursalRelevante);
-    const promosTexto = promos.length > 0 ? promos.map(p => `${p.nombre} (${(p.dias||[]).join(",")} ${p.hora_inicio||""}-${p.hora_fin||""})`).join(", ") : "ninguna activa";
+    const promosTexto = promos.length > 0
+      ? promos.map(p => `${p.nombre} (${(p.dias||[]).join(",")} ${p.hora_inicio||""}-${p.hora_fin||""})`).join(", ")
+      : "ninguna activa";
     bloqueHorario = `\nHORARIO Y PROMOS DE "${sucursalRelevante.nombre}": ${getHorarioSucursal(sucursalRelevante)} | Promos: ${promosTexto}`;
   } else {
     bloqueHorario = `\nHorario general: ${Object.entries(restaurante.horario_general).map(([d,h])=>`${d.slice(0,3)} ${h.abre}-${h.cierra}`).join(", ")}.`;
@@ -77,6 +99,9 @@ DOMICILIO: Envío GRATIS · 40 min · Sin restricciones de zona
 
 SUCURSALES: ${listaSucursalesCorta()}
 ${bloqueHorario}
+
+PROMOCIONES ACTIVAS 2026 (comparte solo si el cliente pregunta):
+${promocionesTexto()}
 
 MENÚ (cada categoría es exclusiva, no mezclar):
 ${menuCompacto()}
@@ -125,7 +150,6 @@ async function procesarMensaje(historial, mensajeNuevo) {
       .trim();
 
     // Salvaguarda: si el texto quedó vacío o es solo una etiqueta huérfana
-    // (ej. "Sucursal:"), generamos un mensaje de respaldo en vez de mandar vacío.
     if (!textoLimpio || textoLimpio.length < 3 || /^sucursal:?$/i.test(textoLimpio)) {
       logger.warn(`Respuesta vacía o inválida detectada, usando fallback. Original: "${textoRespuesta}"`);
       textoLimpio = "¿Me puedes confirmar de nuevo tu pedido? Quiero asegurarme de registrarlo correctamente. 🍣";

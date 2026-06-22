@@ -2,6 +2,7 @@
 // =============================================
 // CONFIGURACIÓN COMPLETA DE MR. SUSHI
 // 25 sucursales reales + menú completo
+// Promociones actualizadas: junio 2026
 // =============================================
 
 module.exports = {
@@ -18,15 +19,62 @@ module.exports = {
     domingo:   { abre: "13:00", cierra: "21:00" },
   },
 
+  // ============================================================
+  // PROMOCIONES ACTIVAS 2026
+  // Fuente: PDF "Promociones Activas 2026"
+  // ============================================================
   promociones_generales: [
     {
-      nombre: "Barra Libre",
-      descripcion: "Barra libre de bebidas incluida en tu orden",
-      dias: ["miercoles","jueves","viernes","sabado","domingo"],
+      nombre: "Barra Libre de Sushi",
+      descripcion: "Come sushi ilimitado por $297 por persona.",
+      precio: 297,
+      dias: ["miercoles", "jueves", "viernes", "sabado"],
       hora_inicio: "18:00",
-      hora_fin: "22:00",
+      hora_fin: "22:30",
       vigencia: "hasta_nuevo_aviso",
       aplica_a: "restaurante",
+      notas: "Solo en restaurante/híbrido. NO aplica en Fast Food ni delivery.",
+    },
+    {
+      nombre: "Coctelería 2x1",
+      descripcion: "Pide 2 cócteles y paga solo 1.",
+      precio: null,
+      dias: ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"],
+      hora_inicio: "13:00",
+      hora_fin: "22:30",
+      hora_fin_domingo: "22:00",
+      vigencia: "hasta_nuevo_aviso",
+      aplica_a: "restaurante",
+      notas: "Lun–Sáb hasta 22:30, Dom hasta 22:00. Solo en restaurante/híbrido. NO aplica en Fast Food.",
+    },
+    {
+      nombre: "Lunch Box",
+      descripcion: "Elige 1 entrada + 1 arroz + 1 rollo + 1 agua por $197. Solo 1 alimento por categoría, extras se cobran aparte.",
+      precio: 197,
+      dias: ["lunes", "martes", "miercoles", "jueves"],
+      hora_inicio: "12:00",
+      hora_fin: "22:00",
+      vigencia: "hasta_nuevo_aviso",
+      aplica_a: "todos",
+      notas: "Lun–Jue todo el día. Aplica en restaurante y Fast Food.",
+      opciones: {
+        entrada: ["Edamames Asados", "Kushiague de Queso (1 pza)", "Kushiague de Plátano/Queso (1 pza)"],
+        arroz:   ["Yakimeshi Verduras", "Gohan Clásico"],
+        rollo:   ["Tuna King", "Spicy Tuna", "Mr. Fura", "Tampico Maki Especial", "Mr. Manchego", "Mr. Kakiague", "Tempura Maki", "Tunagui", "Filadelfia Atún", "Filadelfia Cangrejo", "Filadelfia Camarón", "California Atún", "California Cangrejo", "California Camarón", "Avocado Maki Atún", "Avocado Maki Cangrejo", "Avocado Maki Camarón"],
+        agua:    ["Agua Maracuyá/Mango", "Agua Pepino con Limón"],
+      },
+    },
+    {
+      nombre: "Mr. 4x4",
+      descripcion: "Elige 4 medios rollos. $217 todos los días, $199 solo los martes.",
+      precio_normal: 217,
+      precio_martes: 199,
+      dias: ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"],
+      hora_inicio: "12:00",
+      hora_fin: "22:00",
+      vigencia: "hasta_nuevo_aviso",
+      aplica_a: "todos",
+      notas: "Todos los días en restaurante y Fast Food. Los martes precio especial $199.",
     },
   ],
 
@@ -73,8 +121,8 @@ module.exports = {
       { nombre:"Sushi Hot Mango",            precio:215, descripcion:"Kanikama, Mango y Chile Serrano." },
     ],
     "Combos": [
-      { nombre:"Combo Mr. 4x4",   precio:230, descripcion:"4 Medios Rollos a Elegir entre 18 Opciones." },
-      { nombre:"Combo Lunch Box", precio:250, descripcion:"Entrada, Arroz, Rollo y Agua a elegir." },
+      { nombre:"Combo Mr. 4x4",   precio:217, descripcion:"4 Medios Rollos a elegir. $199 los martes." },
+      { nombre:"Combo Lunch Box", precio:197, descripcion:"Entrada + Arroz + Rollo + Agua a elegir. Lun–Jue." },
     ],
     "Sushi Box": [
       { nombre:"Sushi Box Clásico",   precio:750, descripcion:"6 Rollos en Charola para compartir." },
@@ -143,29 +191,29 @@ module.exports = {
       { nombre:"Sushi Avocado Maki Salmón",     precio:165, descripcion:"Salmón con Queso y Aguacate." },
     ],
     "Rollos Especialidades": [
-      { nombre:"Sushi Spicy Tuna",          precio:210, descripcion:"Atún Picante con Teriyaki." },
-      { nombre:"Sushi Garlic Tuna",         precio:225, descripcion:"Atún, Ajo, Limón y Camarón Tempura." },
-      { nombre:"Sushi Mr. Tampico Habanero",precio:177, descripcion:"Picante con Cangrejo y Queso." },
-      { nombre:"Sushi Mr. Dragon",          precio:220, descripcion:"Mango, Shichimi y Camarón Crunchy." },
-      { nombre:"Sushi Mr. Tempura",         precio:199, descripcion:"Manchego Capeado, Cangrejo y Chipotle." },
-      { nombre:"Sushi Mr. Kakiage",         precio:220, descripcion:"Verduras Tempura, Cangrejo y Queso." },
-      { nombre:"Sushi Red Dragon",          precio:225, descripcion:"Atún, Chipotle y Tempura Crunch." },
-      { nombre:"Sushi Mr. Tampico",         precio:177, descripcion:"Cangrejo, Tampico y Queso Crema." },
-      { nombre:"Sushi Mr. Ebi",             precio:210, descripcion:"Camarón Empanizado, Chipotle y Queso." },
-      { nombre:"Sushi Queso Maki Fry",      precio:195, descripcion:"Camarón Crunchy, Queso y Tampico." },
-      { nombre:"Sushi Mr. Keko",            precio:237, descripcion:"Salmón, Queso Crema, Aguacate y Pepino." },
-      { nombre:"Sushi Mr. Tam Beef",        precio:230, descripcion:"Res, Aguacate, Tampico y Queso Crema." },
-      { nombre:"Sushi Avocado Teriyaki",    precio:197, descripcion:"Pollo Crunchy, Aguacate y Zanahoria." },
-      { nombre:"Sushi Mr. Mango",           precio:195, descripcion:"Mango, Cangrejo, Queso Crema y Aguacate." },
-      { nombre:"Sushi Baby Maki",           precio:187, descripcion:"Baby Squid, Salsa Tare y Queso Crema." },
-      { nombre:"Sushi Mr. Diablo",          precio:337, descripcion:"Salmón Fresco, Camarón Crunchy y Queso." },
-      { nombre:"Sushi Piña Spicy",          precio:175, descripcion:"Camarón Tempura, Piña Picante y Queso." },
-      { nombre:"Mr. Manchego",              precio:195, descripcion:"Queso Manchego Crunchy, Cangrejo y Aguacate." },
-      { nombre:"Sushi Avocado Habanero",    precio:197, descripcion:"Tampico Picante, Camarón y Kakiage." },
-      { nombre:"Sushi Tsunami",             precio:185, descripcion:"Salmón, Aguacate, Cangrejo y Tampico." },
-      { nombre:"Sushi Tunagui",             precio:197, descripcion:"Atún, Anguila, Masago y Aguacate." },
-      { nombre:"Sushi Tuna King",           precio:225, descripcion:"Atún Picante, Aguacate y Chile Tempura." },
-      { nombre:"Sushi Tempura Maki",        precio:197, descripcion:"Queso Crema, Tempura, Cangrejo y Chile." },
+      { nombre:"Sushi Spicy Tuna",           precio:210, descripcion:"Atún Picante con Teriyaki." },
+      { nombre:"Sushi Garlic Tuna",          precio:225, descripcion:"Atún, Ajo, Limón y Camarón Tempura." },
+      { nombre:"Sushi Mr. Tampico Habanero", precio:177, descripcion:"Picante con Cangrejo y Queso." },
+      { nombre:"Sushi Mr. Dragon",           precio:220, descripcion:"Mango, Shichimi y Camarón Crunchy." },
+      { nombre:"Sushi Mr. Tempura",          precio:199, descripcion:"Manchego Capeado, Cangrejo y Chipotle." },
+      { nombre:"Sushi Mr. Kakiage",          precio:220, descripcion:"Verduras Tempura, Cangrejo y Queso." },
+      { nombre:"Sushi Red Dragon",           precio:225, descripcion:"Atún, Chipotle y Tempura Crunch." },
+      { nombre:"Sushi Mr. Tampico",          precio:177, descripcion:"Cangrejo, Tampico y Queso Crema." },
+      { nombre:"Sushi Mr. Ebi",              precio:210, descripcion:"Camarón Empanizado, Chipotle y Queso." },
+      { nombre:"Sushi Queso Maki Fry",       precio:195, descripcion:"Camarón Crunchy, Queso y Tampico." },
+      { nombre:"Sushi Mr. Keko",             precio:237, descripcion:"Salmón, Queso Crema, Aguacate y Pepino." },
+      { nombre:"Sushi Mr. Tam Beef",         precio:230, descripcion:"Res, Aguacate, Tampico y Queso Crema." },
+      { nombre:"Sushi Avocado Teriyaki",     precio:197, descripcion:"Pollo Crunchy, Aguacate y Zanahoria." },
+      { nombre:"Sushi Mr. Mango",            precio:195, descripcion:"Mango, Cangrejo, Queso Crema y Aguacate." },
+      { nombre:"Sushi Baby Maki",            precio:187, descripcion:"Baby Squid, Salsa Tare y Queso Crema." },
+      { nombre:"Sushi Mr. Diablo",           precio:337, descripcion:"Salmón Fresco, Camarón Crunchy y Queso." },
+      { nombre:"Sushi Piña Spicy",           precio:175, descripcion:"Camarón Tempura, Piña Picante y Queso." },
+      { nombre:"Mr. Manchego",               precio:195, descripcion:"Queso Manchego Crunchy, Cangrejo y Aguacate." },
+      { nombre:"Sushi Avocado Habanero",     precio:197, descripcion:"Tampico Picante, Camarón y Kakiage." },
+      { nombre:"Sushi Tsunami",              precio:185, descripcion:"Salmón, Aguacate, Cangrejo y Tampico." },
+      { nombre:"Sushi Tunagui",              precio:197, descripcion:"Atún, Anguila, Masago y Aguacate." },
+      { nombre:"Sushi Tuna King",            precio:225, descripcion:"Atún Picante, Aguacate y Chile Tempura." },
+      { nombre:"Sushi Tempura Maki",         precio:197, descripcion:"Queso Crema, Tempura, Cangrejo y Chile." },
     ],
     "Bowls": [
       { nombre:"Bowl Yakimeshi Rib Eye", precio:210, descripcion:"Rib Eye, Brócoli y Salsa Ajonjolí." },

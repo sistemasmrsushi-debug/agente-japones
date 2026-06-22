@@ -9,7 +9,6 @@ const PEDIDOS_FILE       = path.join(__dirname, "../../data/pedidos.json");
 const RESERVACIONES_FILE = path.join(__dirname, "../../data/reservaciones.json");
 
 const USUARIOS = {
-  // ── RESTAURANTES ──
   "vallejo":           { password: "mrsushi01", sucursal: "Vallejo",               rol: "sucursal" },
   "zonaesmeralda":     { password: "mrsushi02", sucursal: "Zona Esmeralda",        rol: "sucursal" },
   "arboledas":         { password: "mrsushi03", sucursal: "Arboledas",             rol: "sucursal" },
@@ -26,7 +25,6 @@ const USUARIOS = {
   "urbancenter":       { password: "mrsushi23", sucursal: "Urban Center",          rol: "sucursal" },
   "hahhaesmeralda":    { password: "mrsushi24", sucursal: "Hahha Esmeralda",       rol: "sucursal" },
   "patiosantafe":      { password: "mrsushi25", sucursal: "Patio Santa Fe",        rol: "sucursal" },
-  // ── FAST FOOD ──
   "atizapan":          { password: "mrsushi04", sucursal: "Atizapán",              rol: "sucursal" },
   "zonaazuldom":       { password: "mrsushi07", sucursal: "Zona Azul Domicilio",   rol: "sucursal" },
   "perisur":           { password: "mrsushi08", sucursal: "Perisur",               rol: "sucursal" },
@@ -36,7 +34,6 @@ const USUARIOS = {
   "galeriástoluca":    { password: "mrsushi18", sucursal: "Galerías Toluca",       rol: "sucursal" },
   "galeriascuernavaca":{ password: "mrsushi20", sucursal: "Galerías Cuernavaca",   rol: "sucursal" },
   "ccsantafe":         { password: "mrsushi21", sucursal: "CC Santa Fe",           rol: "sucursal" },
-  // ── GERENTES ──
   "gerente":           { password: "gerente2024", sucursal: null,                  rol: "gerente"  },
 };
 
