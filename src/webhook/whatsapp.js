@@ -4,36 +4,21 @@ const router = express.Router();
 const NodeCache = require("node-cache");
 const { procesarMensaje } = require("../agent/agente");
 const logger = require("../utils/logger");
-const fs = require("fs");
-const path = require("path");
+const db = require("../db/database");
 
-const conversaciones  = new NodeCache({ stdTTL: 86400 });
-const estadosPedido   = new NodeCache({ stdTTL: 3600 }); // estado activo del pedido en curso
-const PEDIDOS_FILE       = path.join(__dirname, "../../data/pedidos.json");
-const RESERVACIONES_FILE = path.join(__dirname, "../../data/reservaciones.json");
+const estadosPedido = new NodeCache({ stdTTL: 3600 });
 
 function getTwilioClient() {
   return require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 }
 
-function leerArchivo(ruta) {
-  if (!fs.existsSync(ruta)) return [];
-  try { return JSON.parse(fs.readFileSync(ruta, "utf8")); } catch { return []; }
-}
-
-function guardarArchivo(ruta, datos) {
-  const dir = path.dirname(ruta);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(ruta, JSON.stringify(datos, null, 2));
-}
-
-// ── Detectar confirmacion corta del cliente ───────────────────────────────
 function esConfirmacion(texto) {
   const t = texto.toLowerCase().trim()
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const frases = ["si","ahi","esa","ok","dale","listo","adelante","perfecto",
     "ahi esta bien","esa esta bien","de ahi","me parece bien","claro","va",
-    "por favor","esta bien","ahi por favor","de esa","bueno","sale","andale"];
+    "por favor","esta bien","ahi por favor","de esa","bueno","sale","andale",
+    "desde ahi","esa sucursal","si por favor","ok por favor"];
   return frases.some(f => t === f || t.startsWith(f + " ") || t.endsWith(" " + f));
 }
 
@@ -49,14 +34,7 @@ router.post("/webhook", async (req, res) => {
     if (latitude && longitude) {
       logger.info(`GPS recibido de ${telefono}: ${latitude}, ${longitude}`);
       const mapsUrl = `https://maps.google.com/?q=${latitude},${longitude}`;
-      const pedidos = leerArchivo(PEDIDOS_FILE);
-      const idx = pedidos.map((p, i) => ({ p, i })).reverse()
-        .find(({ p }) => p.telefono_cliente === telefono && p.tipo === "domicilio");
-      if (idx) {
-        pedidos[idx.i].ubicacion_gps = { latitude, longitude, maps_url: mapsUrl };
-        pedidos[idx.i].actualizado = new Date().toISOString();
-        guardarArchivo(PEDIDOS_FILE, pedidos);
-      }
+      await db.actualizarGPSPedido(telefono, { latitude, longitude, maps_url: mapsUrl });
       await enviarMensaje(telefono, "Ubicacion recibida! Ya la guardamos para la entrega.");
       return;
     }
@@ -66,33 +44,44 @@ router.post("/webhook", async (req, res) => {
     if (!mensaje) return;
     logger.info(`Msg de ${telefono}: ${mensaje.substring(0, 80)}`);
 
-    // ── Interceptar confirmacion de sucursal ──────────────────────────────
-    // Si hay un pedido en curso esperando confirmacion de sucursal
-    // y el cliente manda una confirmacion corta -> registrar sin llamar a Groq
+    // ── Interceptar confirmacion rapida de sucursal ───────────────────────
     const estado = estadosPedido.get(telefono);
     if (estado && estado.fase === "esperando_confirmacion_sucursal" && esConfirmacion(mensaje)) {
-      logger.info(`Confirmacion directa de sucursal para ${telefono}: ${estado.sucursal_sugerida}`);
-      await registrarPedidoFinal(telefono, estado);
+      logger.info(`Confirmacion directa: ${telefono} -> ${estado.sucursal_sugerida}`);
+      const pedido = {
+        id: `PED-${Date.now()}`,
+        fecha: new Date().toISOString(),
+        estado: "pendiente",
+        telefono_cliente: telefono,
+        sucursal: estado.sucursal_sugerida,
+        items: estado.items,
+        tipo: "domicilio",
+        direccion: estado.direccion || null,
+        colonia: estado.colonia || null,
+        referencias: estado.referencias || null,
+        ubicacion_gps: null,
+      };
+      await db.guardarPedido(pedido);
       estadosPedido.del(telefono);
       const total = estado.items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
-      const itemsTexto = estado.items.map(i => `${i.cantidad || 1}x ${i.nombre} ($${i.precio})`).join(", ");
+      const itemsTexto = estado.items.map(i => `${i.cantidad || 1}x ${i.nombre} ($${i.precio})`).join("\n");
       await enviarMensaje(telefono,
-        `Perfecto! Tu pedido ha sido registrado:\n${itemsTexto}\nTotal: $${total}\nEnvio desde: ${estado.sucursal_sugerida}\nDireccion: ${estado.direccion}\n\nTiempo estimado: 40 minutos. Envio GRATIS!`
+        `Perfecto! Tu pedido esta registrado:\n${itemsTexto}\n\nTotal: $${total}\nSucursal: ${estado.sucursal_sugerida}\nDireccion: ${estado.direccion}\n\nTiempo estimado: 40 min. Envio GRATIS!`
       );
       setTimeout(async () => {
         await enviarMensaje(telefono,
-          "Una cosa mas: para asegurarnos de llegar exactamente a tu puerta, podrias compartir tu ubicacion por WhatsApp? Solo toca el clip -> Ubicacion -> Enviar mi ubicacion actual. Es opcional."
+          "Una cosa mas: podrias compartir tu ubicacion por WhatsApp para que la sucursal llegue exactamente a tu puerta? Solo toca el clip -> Ubicacion -> Enviar mi ubicacion actual. Es opcional."
         );
       }, 3000);
       return;
     }
 
     // ── Flujo normal con Groq ─────────────────────────────────────────────
-    const historial = conversaciones.get(telefono) || [];
+    const historial = await db.obtenerHistorial(telefono);
     const resultado = await procesarMensaje(historial, mensaje);
-    conversaciones.set(telefono, resultado.historialActualizado);
+    await db.guardarHistorial(telefono, resultado.historialActualizado);
 
-    // Si el agente sugiere una sucursal para domicilio, guardar estado
+    // Si el agente sugiere sucursal para domicilio -> guardar estado
     if (resultado.sucursalSugerida && resultado.itemsPedido) {
       estadosPedido.set(telefono, {
         fase: "esperando_confirmacion_sucursal",
@@ -102,18 +91,16 @@ router.post("/webhook", async (req, res) => {
         colonia: resultado.coloniaCliente,
         referencias: resultado.referenciasCliente,
       });
+      logger.info(`Estado guardado para ${telefono}: esperando confirmacion de ${resultado.sucursalSugerida}`);
     }
 
-    // Enviar respuesta primero
+    // Enviar respuesta al cliente
     await enviarMensaje(telefono, resultado.texto);
 
-    // Luego ejecutar accion si la hay
+    // Ejecutar accion si la hay
     if (resultado.accion) {
       await ejecutarAccion(resultado.accion, resultado.datos, telefono);
-      // Si se registro un pedido, limpiar estado
-      if (resultado.accion === "REGISTRAR_PEDIDO") {
-        estadosPedido.del(telefono);
-      }
+      if (resultado.accion === "REGISTRAR_PEDIDO") estadosPedido.del(telefono);
     }
 
   } catch (error) {
@@ -123,30 +110,9 @@ router.post("/webhook", async (req, res) => {
 
 router.get("/webhook", (req, res) => res.send("Webhook activo"));
 
-async function registrarPedidoFinal(telefono, estado) {
-  const pedidos = leerArchivo(PEDIDOS_FILE);
-  const pedido = {
-    id: `PED-${Date.now()}`,
-    fecha: new Date().toISOString(),
-    estado: "pendiente",
-    telefono_cliente: telefono,
-    sucursal: estado.sucursal_sugerida,
-    items: estado.items,
-    tipo: "domicilio",
-    direccion: estado.direccion || null,
-    colonia: estado.colonia || null,
-    referencias: estado.referencias || null,
-    ubicacion_gps: null,
-  };
-  pedidos.push(pedido);
-  guardarArchivo(PEDIDOS_FILE, pedidos);
-  logger.info(`Pedido directo registrado: ${pedido.id} -> ${pedido.sucursal}`);
-}
-
 async function ejecutarAccion(accion, datos, telefono) {
   try {
     if (accion === "REGISTRAR_PEDIDO") {
-      const pedidos = leerArchivo(PEDIDOS_FILE);
       const pedido = {
         id: `PED-${Date.now()}`,
         fecha: new Date().toISOString(),
@@ -160,19 +126,17 @@ async function ejecutarAccion(accion, datos, telefono) {
         referencias: datos.pedido?.referencias || null,
         ubicacion_gps: null,
       };
-      pedidos.push(pedido);
-      guardarArchivo(PEDIDOS_FILE, pedidos);
-      logger.info(`Pedido registrado: ${pedido.id} -> ${pedido.sucursal}`);
+      await db.guardarPedido(pedido);
+      logger.info(`Pedido guardado en DB: ${pedido.id} -> ${pedido.sucursal}`);
       if (pedido.tipo === "domicilio") {
         setTimeout(async () => {
           await enviarMensaje(telefono,
-            "Una cosa mas: podrias compartir tu ubicacion por WhatsApp? Solo toca el clip -> Ubicacion -> Enviar mi ubicacion actual. Es opcional pero ayuda mucho."
+            "Una cosa mas: podrias compartir tu ubicacion por WhatsApp? Solo toca el clip -> Ubicacion -> Enviar mi ubicacion actual. Es opcional."
           );
         }, 3000);
       }
 
     } else if (accion === "REGISTRAR_RESERVACION") {
-      const reservaciones = leerArchivo(RESERVACIONES_FILE);
       const reservacion = {
         id: `RES-${Date.now()}`,
         fecha_registro: new Date().toISOString(),
@@ -180,9 +144,8 @@ async function ejecutarAccion(accion, datos, telefono) {
         telefono_cliente: telefono,
         ...datos.reservacion,
       };
-      reservaciones.push(reservacion);
-      guardarArchivo(RESERVACIONES_FILE, reservaciones);
-      logger.info(`Reservacion guardada: ${reservacion.id}`);
+      await db.guardarReservacion(reservacion);
+      logger.info(`Reservacion guardada en DB: ${reservacion.id}`);
 
     } else if (accion === "ESCALAR_HUMANO") {
       logger.warn(`ESCALACION para ${telefono}: ${datos.motivo}`);
