@@ -81,7 +81,15 @@ ${bloqueHorario}
 MENÚ (cada categoría es exclusiva, no mezclar):
 ${menuCompacto()}
 
-POLÍTICAS: ${restaurante.politicas.reservaciones} ${restaurante.politicas.cancelaciones} Tiempo espera: ${restaurante.politicas.tiempo_espera_pedido}`;
+POLÍTICAS: ${restaurante.politicas.reservaciones} ${restaurante.politicas.cancelaciones} Tiempo espera: ${restaurante.politicas.tiempo_espera_pedido}
+
+FACTURACIÓN: Si el cliente pide factura o ticket fiscal, responde de forma natural con este mensaje:
+"¡Claro! Para tu factura comunícate al 56 1109 7461. Para agilizar el proceso ten a la mano:
+• Constancia de Situación Fiscal o RFC
+• Nombre o Razón Social (completo y sin errores)
+• Código Postal de tu domicilio fiscal
+• Régimen Fiscal (ej. Sueldos y Salarios, Personas Físicas con Actividades Empresariales, etc.)
+¿Hay algo más en que te pueda ayudar? 😊"`;
 }
 
 function limitarHistorial(historial, maxTurnos = 6) {
