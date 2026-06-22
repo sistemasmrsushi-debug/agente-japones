@@ -9,8 +9,8 @@ function getGroq() {
 
 function getHorarioSucursal(sucursal) {
   const horario = sucursal.horario_propio || restaurante.horario_general;
-  const dias = { lunes:"Lun", martes:"Mar", miercoles:"Mié", jueves:"Jue", viernes:"Vie", sabado:"Sáb", domingo:"Dom" };
-  return Object.entries(horario).map(([dia, h]) => `${dias[dia]}: ${h.abre}–${h.cierra}`).join(" · ");
+  const dias = { lunes:"Lun", martes:"Mar", miercoles:"Mie", jueves:"Jue", viernes:"Vie", sabado:"Sab", domingo:"Dom" };
+  return Object.entries(horario).map(([dia, h]) => `${dias[dia]}: ${h.abre}-${h.cierra}`).join(" | ");
 }
 
 function getPromocionesSucursal(sucursal) {
@@ -31,7 +31,7 @@ function listaSucursalesCorta() {
 function menuCompacto() {
   return Object.entries(restaurante.menu)
     .map(([categoria, items]) => {
-      const lista = items.map(i => `${i.nombre} $${i.precio}`).join(" · ");
+      const lista = items.map(i => `${i.nombre} $${i.precio}`).join(" | ");
       return `[${categoria}] (${items.length}): ${lista}`;
     })
     .join("\n");
@@ -41,20 +41,39 @@ function promocionesTexto() {
   const promos = restaurante.promociones_generales || [];
   return promos.map(p => {
     if (p.nombre === "Barra Libre de Sushi") {
-      return `🍣 BARRA LIBRE DE SUSHI — $${p.precio}/persona · Mié–Sáb 18:00–22:30 · Solo restaurante/híbrido, NO Fast Food ni delivery.`;
+      return `BARRA LIBRE DE SUSHI $${p.precio}/persona | Mie-Sab 18:00-22:30 | Solo restaurante/hibrido, NO Fast Food ni delivery.`;
     }
-    if (p.nombre === "Coctelería 2x1") {
-      return `🍹 COCTELERÍA 2x1 — Paga 1 lleva 2 · Lun–Sáb 13:00–22:30 / Dom 13:00–22:00 · Solo restaurante/híbrido, NO Fast Food.`;
+    if (p.nombre === "Cocteleria 2x1" || p.nombre === "Coctelería 2x1") {
+      return `COCTELERIA 2x1 Paga 1 lleva 2 | Lun-Sab 13:00-22:30 / Dom 13:00-22:00 | Solo restaurante/hibrido, NO Fast Food.`;
     }
     if (p.nombre === "Lunch Box") {
-      const opciones = p.opciones;
-      return `🥡 LUNCH BOX — $${p.precio} · Lun–Jue todo el día · Restaurante y Fast Food.\n   Elige: 1 entrada (${opciones.entrada.join(" / ")}) + 1 arroz (${opciones.arroz.join(" / ")}) + 1 rollo (${opciones.rollo.join(" / ")}) + 1 agua (${opciones.agua.join(" / ")}). Solo 1 por categoría, extras se cobran aparte.`;
+      const o = p.opciones;
+      return `LUNCH BOX $${p.precio} | Lun-Jue todo el dia | Restaurante y Fast Food. Elige: 1 entrada (${o.entrada.join(" / ")}) + 1 arroz (${o.arroz.join(" / ")}) + 1 rollo (${o.rollo.join(" / ")}) + 1 agua (${o.agua.join(" / ")}). Solo 1 por categoria, extras se cobran aparte.`;
     }
     if (p.nombre === "Mr. 4x4") {
-      return `🔲 MR. 4x4 — Elige 4 medios rollos · $${p.precio_normal} todos los días / $${p.precio_martes} solo los martes · Restaurante y Fast Food.`;
+      return `MR. 4x4 Elige 4 medios rollos | $${p.precio_normal} todos los dias / $${p.precio_martes} solo los martes | Restaurante y Fast Food.`;
     }
     return `${p.nombre}: ${p.descripcion}`;
   }).join("\n");
+}
+
+// ============================================================
+// DETECCION DE SUCURSAL MAS CERCANA POR ZONA
+// ============================================================
+function detectarSucursalPorZona(texto) {
+  if (!texto) return null;
+  const t = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const zonas = restaurante.zonas_domicilio || [];
+  for (const zona of zonas) {
+    for (const keyword of zona.keywords) {
+      const kw = keyword.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (t.includes(kw)) {
+        logger.info(`Zona detectada: "${keyword}" -> Sucursal: ${zona.sucursal}`);
+        return zona.sucursal;
+      }
+    }
+  }
+  return null;
 }
 
 function detectarSucursalMencionada(mensaje) {
@@ -62,7 +81,7 @@ function detectarSucursalMencionada(mensaje) {
   return restaurante.sucursales.find(s => texto.includes(s.nombre.toLowerCase()));
 }
 
-function buildSystemPrompt(sucursalRelevante) {
+function buildSystemPrompt(sucursalRelevante, zonaSugerida) {
   let bloqueHorario = "";
   if (sucursalRelevante) {
     const promos = getPromocionesSucursal(sucursalRelevante);
@@ -74,47 +93,53 @@ function buildSystemPrompt(sucursalRelevante) {
     bloqueHorario = `\nHorario general: ${Object.entries(restaurante.horario_general).map(([d,h])=>`${d.slice(0,3)} ${h.abre}-${h.cierra}`).join(", ")}.`;
   }
 
-  return `Eres el asistente virtual de ${restaurante.nombre}, restaurante japonés. Responde breve, directo, y SIEMPRE con una respuesta completa en texto natural — nunca dejes un mensaje vacío o solo con una palabra como "Sucursal:".
+  const bloqueZona = zonaSugerida
+    ? `\n[ZONA DETECTADA]: La direccion del cliente corresponde a la zona de "${zonaSugerida}". En el Paso C sugiere esta sucursal.`
+    : "";
+
+  const listaSucursales = restaurante.sucursales.map(s => s.nombre).join(", ");
+
+  return `Eres el asistente virtual de Mr. Sushi, restaurante japones. Responde breve, directo, y SIEMPRE en texto natural completo. NUNCA muestres etiquetas como [PEDIDO] al cliente — son solo para el sistema interno.
 
 REGLAS:
-1. Lee TODA la conversación. Si el cliente ya respondió algo, NO lo preguntes de nuevo.
-2. "sucursales" = lugares físicos. "menú/platillos/rollos" = comida. No mezcles.
-3. El menú está dividido en categorías entre corchetes [Categoría]. Cada platillo SOLO pertenece a su categoría, no las mezcles.
-4. Al listar una categoría completa, enumera TODOS sus platillos salvo que pidan "ejemplos".
+1. Lee TODA la conversacion. Si el cliente ya respondio algo, NO lo preguntes de nuevo.
+2. "sucursales" = lugares fisicos. "menu/platillos/rollos" = comida. No mezcles.
+3. El menu esta dividido en categorias entre corchetes [Categoria]. Cada platillo SOLO pertenece a su categoria.
+4. Al listar una categoria completa, enumera TODOS sus platillos salvo que pidan "ejemplos".
 
-FLUJO DE PEDIDO — sigue estos pasos EXACTOS, en orden, sin saltarte ninguno:
-Paso A: Cliente menciona productos → confirmas qué pidió con precios y preguntas: "¿Lo quieres recoger en sucursal o que te lo enviemos a domicilio?"
-Paso B1: Si responde "sucursal" o "recoger" → preguntas: "¿En cuál sucursal?" (si no la dijo ya)
-Paso B2: Si responde "domicilio" o "a mi casa" → respondes con una frase completa como: "¡Perfecto! ¿Cuál es tu dirección completa, colonia y alguna referencia para la entrega?"
-Paso C: Cuando el cliente da la sucursal (B1) o la dirección completa (B2) → en ese mismo mensaje generas la confirmación final con TODOS los datos del pedido y la etiqueta [PEDIDO]. Nunca generes la etiqueta antes de tener tipo + sucursal/dirección.
-IMPORTANTE: nunca respondas solo "Sucursal:" ni dejes una respuesta a medias. Siempre da una oración completa.
+FLUJO DE PEDIDO — pasos EXACTOS en orden:
+Paso A: Cliente menciona productos -> confirmas que pidio con precios y preguntas: "Lo quieres recoger en sucursal o te lo enviamos a domicilio?"
+Paso B1: Si dice "sucursal" o "recoger" -> preguntas: "En cual sucursal?" (si no la dijo ya)
+Paso B2: Si dice "domicilio" o "a mi casa" -> preguntas: "Cual es tu direccion completa, colonia y alguna referencia?"
+Paso C DOMICILIO: Cuando tienes la direccion:
+  - Si hay ZONA DETECTADA -> dices: "La sucursal mas cercana a tu zona es [SUCURSAL]. Te enviamos desde ahi o prefieres otra?"
+  - Si NO hay zona -> preguntas: "Cual sucursal prefieres que te envie? Tenemos: ${listaSucursales}"
+  - Cuando el cliente confirma sucursal -> generas confirmacion final + etiqueta [PEDIDO] OCULTA.
+Paso C SUCURSAL: Cuando el cliente da sucursal -> confirmacion final + etiqueta [PEDIDO] OCULTA.
 
-REGISTRAR — etiquetas ocultas al final del mensaje (el cliente NO las ve):
-Sucursal: [PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"...","precio":0,"cantidad":1}],"tipo":"sucursal","sucursal":"..."}}[/PEDIDO]
-Domicilio: [PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"...","precio":0,"cantidad":1}],"tipo":"domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"domicilio"}}[/PEDIDO]
-Reservación: [RESERVACION]{"accion":"REGISTRAR_RESERVACION","reservacion":{"nombre":"...","fecha":"...","hora":"...","personas":0,"sucursal":"..."}}[/RESERVACION]
-Escalar: [ESCALAR]{"accion":"ESCALAR_HUMANO","motivo":"..."}[/ESCALAR]
+CRITICO: Las etiquetas [PEDIDO], [RESERVACION], [ESCALAR] son INVISIBLES para el cliente. NUNCA las escribas en el texto visible. Van solo al final del mensaje como datos del sistema.
+${bloqueZona}
 
-DOMICILIO: Envío GRATIS · 40 min · Sin restricciones de zona
+ETIQUETAS DEL SISTEMA (invisibles, solo al final):
+[PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"...","precio":0,"cantidad":1}],"tipo":"sucursal","sucursal":"..."}}[/PEDIDO]
+[PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"...","precio":0,"cantidad":1}],"tipo":"domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"NOMBRE_SUCURSAL_ASIGNADA"}}[/PEDIDO]
+[RESERVACION]{"accion":"REGISTRAR_RESERVACION","reservacion":{"nombre":"...","fecha":"...","hora":"...","personas":0,"sucursal":"..."}}[/RESERVACION]
+[ESCALAR]{"accion":"ESCALAR_HUMANO","motivo":"..."}[/ESCALAR]
+
+DOMICILIO: Envio GRATIS | 40 min | Sin restricciones de zona
 
 SUCURSALES: ${listaSucursalesCorta()}
 ${bloqueHorario}
 
-PROMOCIONES ACTIVAS 2026 (comparte solo si el cliente pregunta):
+PROMOCIONES ACTIVAS 2026 (solo si el cliente pregunta):
 ${promocionesTexto()}
 
-MENÚ (cada categoría es exclusiva, no mezclar):
+MENU (cada categoria es exclusiva, no mezclar):
 ${menuCompacto()}
 
-POLÍTICAS: ${restaurante.politicas.reservaciones} ${restaurante.politicas.cancelaciones} Tiempo espera: ${restaurante.politicas.tiempo_espera_pedido}
+POLITICAS: ${restaurante.politicas.reservaciones} ${restaurante.politicas.cancelaciones} Tiempo espera: ${restaurante.politicas.tiempo_espera_pedido}
 
-FACTURACIÓN: Si el cliente pide factura o ticket fiscal, responde de forma natural con este mensaje:
-"¡Claro! Para tu factura comunícate al 56 1109 7461. Para agilizar el proceso ten a la mano:
-• Constancia de Situación Fiscal o RFC
-• Nombre o Razón Social (completo y sin errores)
-• Código Postal de tu domicilio fiscal
-• Régimen Fiscal (ej. Sueldos y Salarios, Personas Físicas con Actividades Empresariales, etc.)
-¿Hay algo más en que te pueda ayudar? 😊"`;
+FACTURACION: Si piden factura responde: "Para tu factura llamanos al 56 1109 7461 y ten a la mano: RFC o Constancia de Situacion Fiscal, Nombre o Razon Social, Codigo Postal fiscal y Regimen Fiscal."`;
 }
 
 function limitarHistorial(historial, maxTurnos = 6) {
@@ -129,11 +154,12 @@ async function procesarMensaje(historial, mensajeNuevo) {
     const historialLimitado = limitarHistorial(historial);
     const textoReciente = [mensajeNuevo, ...historialLimitado.slice(-4).map(m => m.content)].join(" ");
     const sucursalRelevante = detectarSucursalMencionada(textoReciente);
+    const zonaSugerida = detectarSucursalPorZona(textoReciente);
 
     const response = await groq.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages: [
-        { role: "system", content: buildSystemPrompt(sucursalRelevante) },
+        { role: "system", content: buildSystemPrompt(sucursalRelevante, zonaSugerida) },
         ...historialLimitado.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })),
         { role: "user", content: mensajeNuevo },
       ],
@@ -143,16 +169,18 @@ async function procesarMensaje(historial, mensajeNuevo) {
 
     let textoRespuesta = response.choices[0].message.content;
     const accion = detectarAccion(textoRespuesta);
+
+    // Limpiar TODAS las etiquetas del sistema antes de enviar al cliente
     let textoLimpio = textoRespuesta
-      .replace(/\[PEDIDO\][\s\S]*?\[\/PEDIDO\]/g, "")
-      .replace(/\[RESERVACION\][\s\S]*?\[\/RESERVACION\]/g, "")
-      .replace(/\[ESCALAR\][\s\S]*?\[\/ESCALAR\]/g, "")
+      .replace(/\[PEDIDO\][\s\S]*?\[\/PEDIDO\]/gi, "")
+      .replace(/\[RESERVACION\][\s\S]*?\[\/RESERVACION\]/gi, "")
+      .replace(/\[ESCALAR\][\s\S]*?\[\/ESCALAR\]/gi, "")
+      .replace(/\[ZONA DETECTADA\][\s\S]*?\n/gi, "")
       .trim();
 
-    // Salvaguarda: si el texto quedó vacío o es solo una etiqueta huérfana
     if (!textoLimpio || textoLimpio.length < 3 || /^sucursal:?$/i.test(textoLimpio)) {
-      logger.warn(`Respuesta vacía o inválida detectada, usando fallback. Original: "${textoRespuesta}"`);
-      textoLimpio = "¿Me puedes confirmar de nuevo tu pedido? Quiero asegurarme de registrarlo correctamente. 🍣";
+      logger.warn(`Respuesta invalida, usando fallback. Original: "${textoRespuesta}"`);
+      textoLimpio = "Me puedes confirmar de nuevo tu pedido? Quiero asegurarme de registrarlo correctamente.";
     }
 
     return {
@@ -169,12 +197,12 @@ async function procesarMensaje(historial, mensajeNuevo) {
 
 function detectarAccion(texto) {
   try {
-    const m = texto.match(/\[(PEDIDO|RESERVACION|ESCALAR)\]([\s\S]*?)\[\/\1\]/);
+    const m = texto.match(/\[(PEDIDO|RESERVACION|ESCALAR)\]([\s\S]*?)\[\/\1\]/i);
     if (!m) return null;
     const datos = JSON.parse(m[2].trim());
-    logger.info(`Acción: ${datos.accion}`);
+    logger.info(`Accion: ${datos.accion}`);
     return { tipo: datos.accion, datos };
   } catch(e) { return null; }
 }
 
-module.exports = { procesarMensaje };
+module.exports = { procesarMensaje, detectarSucursalPorZona };
