@@ -256,10 +256,21 @@ function filaP(p) {
     ${p.estado!=='cancelado'?`<button class="btn-accion rojo" onclick="cambiarEstado('pedido','${p.id}','cancelado')">Cancelar</button>`:''}
   ` : '<span style="color:var(--muted);font-size:0.6rem">Solo lectura</span>';
   const tipo = p.tipo==='domicilio' ? '🚚 Domicilio' : '🏪 Sucursal';
+  // Telefono como link de llamada
+  const telLimpio = (p.telefono_cliente||'').replace('whatsapp:','');
+  const telLink = telLimpio ? `<a href="tel:${telLimpio}" style="color:var(--turquesa);text-decoration:none">${telLimpio}</a>` : '—';
+  // Direccion para domicilios
+  const direccionHtml = p.tipo==='domicilio' && p.direccion
+    ? `<div style="font-size:0.65rem;color:var(--muted);margin-top:0.3rem">📍 ${p.direccion}${p.colonia?', '+p.colonia:''}${p.referencias?'<br>Ref: '+p.referencias:''}</div>`
+    : '';
+  // GPS link si existe
+  const gpsHtml = p.ubicacion_gps?.maps_url
+    ? `<div style="margin-top:0.3rem"><a href="${p.ubicacion_gps.maps_url}" target="_blank" style="color:var(--verde);font-size:0.6rem;text-decoration:none">📌 Ver en mapa</a></div>`
+    : '';
   return `<tr>
     <td><div style="font-size:0.6rem;color:var(--muted)">${p.id}</div><div style="font-size:0.65rem;color:var(--muted)">${hora}</div></td>
-    <td>${(p.telefono_cliente||'—').replace('whatsapp:','')}</td>
-    <td>${items}</td>
+    <td>${telLink}</td>
+    <td>${items}${direccionHtml}${gpsHtml}</td>
     <td>${p.sucursal||'—'}</td>
     <td style="font-size:0.7rem">${tipo}</td>
     <td style="color:var(--turquesa)">${total!=='—'?'$'+total+' MXN':'—'}</td>
