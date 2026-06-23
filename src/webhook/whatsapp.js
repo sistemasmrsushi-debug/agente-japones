@@ -12,12 +12,14 @@ function getTwilioClient() {
 // ── Detecta confirmacion simple ───────────────────────────────────────────────
 function esConfirmacion(texto) {
   const t = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-  // Negaciones y palabras que NO son confirmacion
-  if (/\b(no|otra|diferente|cambia|prefiero|ninguna|quiero cambiar|gracias|adios|bye|hasta|de nada|ok gracias|listo gracias|perfecto gracias)\b/.test(t)) return false;
-  // Solo confirmaciones explicitas
-  if (/^(si|ok|dale|va|esa|ahi|claro|adelante|andale|orale|correcto|desde ahi|esa misma|ahi mismo|ahi esta bien|de ahi|esa esta bien|si por favor|ok dale|si dale|va dale|esa mera|esa mera si|de esa|esa jala|va esa|sale esa|ahi va|de ahi mismo|ahi nomás|ahi nomas)$/.test(t)) return true;
-  // Mensaje corto SIN palabras de cortesia o despedida
-  if (t.length <= 15 && !/\b(no|cual|donde|cuando|cuanto|que|como|quien|por|gracias|adios|bye|nada|bien|todo)\b/.test(t)) return true;
+  // Negaciones — NO es confirmacion
+  if (/\b(no quiero|prefiero otra|cambia|ninguna|otra sucursal)\b/.test(t)) return false;
+  // Palabras que parecen confirmacion pero NO lo son
+  if (/^(gracias|adios|bye|hasta luego|de nada|con gusto|perfecto gracias|ok gracias|listo gracias|muchas gracias|thank)/.test(t)) return false;
+  // Confirmacion explicita — incluye typos comunes
+  if (/\b(si|sí|ok|dale|va|claro|adelante|andale|orale|correcto|sale|ahi|esa|de ahi|desde ahi)\b/.test(t) && t.length <= 40) return true;
+  // "si, esa sucursa esta bien" — patron: empieza con si/ok + menciona sucursal
+  if (/^(si|ok|dale|claro|va)/.test(t) && t.length <= 50) return true;
   return false;
 }
 
@@ -213,16 +215,21 @@ router.post("/webhook", async (req, res) => {
     if (pidioDir && tieneProductos && !estado) {
       const items = resultado.datos?.pedido?.items ||
         extraerItemsConPreciosReales(resultado.historialActualizado);
+      // Detectar si el agente ya menciono una sucursal en su respuesta
+      const restauranteConfig = require("../../config/restaurante");
+      const sucursalEnTexto = restauranteConfig.sucursales.find(s =>
+        resultado.texto.toLowerCase().includes(s.nombre.toLowerCase())
+      );
       await db.guardarEstadoPedido(telefono, {
-        fase: "esperando_direccion",
+        fase: sucursalEnTexto ? "esperando_confirmacion_sucursal" : "esperando_direccion",
         items: items.map(i => {
           const real = buscarPlatillo(i.nombre);
           return real ? { nombre: real.nombre, precio: real.precio, cantidad: i.cantidad || 1 } : i;
         }),
-        sucursal_sugerida: null,
+        sucursal_sugerida: sucursalEnTexto?.nombre || null,
         direccion: null,
       });
-      logger.info(`Estado esperando_direccion guardado para ${telefono}`);
+      logger.info(`Estado guardado: fase=${sucursalEnTexto ? "esperando_confirmacion_sucursal" : "esperando_direccion"}, sucursal=${sucursalEnTexto?.nombre || "null"}`);
     }
 
     // Si el agente registro pedido directamente
