@@ -15,7 +15,7 @@ function esConfirmacion(texto) {
   // Negaciones y palabras que NO son confirmacion
   if (/\b(no|otra|diferente|cambia|prefiero|ninguna|quiero cambiar|gracias|adios|bye|hasta|de nada|ok gracias|listo gracias|perfecto gracias)\b/.test(t)) return false;
   // Solo confirmaciones explicitas
-  if (/^(si|ok|dale|va|esa|ahi|claro|adelante|andale|orale|correcto|desde ahi|esa misma|ahi mismo|ahi esta bien|de ahi|esa esta bien|si por favor|ok dale|si dale|va dale)$/.test(t)) return true;
+  if (/^(si|ok|dale|va|esa|ahi|claro|adelante|andale|orale|correcto|desde ahi|esa misma|ahi mismo|ahi esta bien|de ahi|esa esta bien|si por favor|ok dale|si dale|va dale|esa mera|esa mera si|de esa|esa jala|va esa|sale esa|ahi va|de ahi mismo|ahi nomás|ahi nomas)$/.test(t)) return true;
   // Mensaje corto SIN palabras de cortesia o despedida
   if (t.length <= 15 && !/\b(no|cual|donde|cuando|cuanto|que|como|quien|por|gracias|adios|bye|nada|bien|todo)\b/.test(t)) return true;
   return false;
@@ -117,6 +117,8 @@ router.post("/webhook", async (req, res) => {
       };
       await db.guardarPedido(pedido);
       await db.eliminarEstadoPedido(telefono);
+      // Limpiar historial para evitar que mensajes de cortesia post-pedido generen respuestas raras
+      await db.guardarHistorial(telefono, []);
       logger.info(`Pedido registrado: ${pedido.id} -> ${pedido.sucursal}`);
 
       const total = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
