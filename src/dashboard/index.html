@@ -117,6 +117,7 @@ tr:hover td{background:var(--gris1)}
     </div>
     <div class="header-right">
       <span class="header-time" id="reloj"></span>
+      <button class="logout-btn" id="btn-sonido" onclick="activarSonido()" style="border-color:var(--naranja);color:var(--naranja)">🔔 Activar sonido</button>
       <button class="logout-btn" onclick="logout()">Salir</button>
     </div>
   </div>
@@ -359,6 +360,27 @@ function detenerAlarma() {
 
 function reproducirSonido() { iniciarAlarma(); }
 
+let sonidoActivado = false;
+function activarSonido() {
+  // Reproducir un beep silencioso para desbloquear el AudioContext
+  try {
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.001, ctx.currentTime);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.1);
+    sonidoActivado = true;
+    const btn = document.getElementById('btn-sonido');
+    btn.textContent = '🔔 Sonido activo';
+    btn.style.borderColor = 'var(--verde)';
+    btn.style.color = 'var(--verde)';
+    btn.onclick = null;
+    btn.style.cursor = 'default';
+  } catch(e) {}
+}
+
 async function aceptarPedido(id) {
   detenerAlarma();
   cerrarAlerta();
@@ -369,7 +391,7 @@ async function aceptarPedido(id) {
 function mostrarAlerta(texto) {
   document.getElementById('alerta-texto').textContent = texto + ' — Haz click en "Aceptar pedido"';
   document.getElementById('alerta-banner').style.display = 'flex';
-  iniciarAlarma();
+  if (sonidoActivado) iniciarAlarma();
   // NO se cierra sola — solo se cierra al aceptar el pedido
 }
 function cerrarAlerta() { document.getElementById('alerta-banner').style.display='none'; }

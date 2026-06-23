@@ -143,11 +143,14 @@ router.post("/webhook", async (req, res) => {
       logger.info(`Direccion recibida. Zona: ${sucursalSugerida}`);
 
       // Actualizar estado con la direccion y nueva fase
+      const dirLimpia2 = mensaje
+        .replace(/^(a domicilio|domicilio|quiero|por favor|favor)[,\s]*/i, '')
+        .trim();
       await db.guardarEstadoPedido(telefono, {
         ...estado,
         fase: "esperando_confirmacion_sucursal",
         sucursal_sugerida: sucursalSugerida,
-        direccion: mensaje,
+        direccion: dirLimpia2,
       });
 
       if (zona) {
@@ -176,11 +179,15 @@ router.post("/webhook", async (req, res) => {
             })
           : extraerItemsConPreciosReales(resultado.historialActualizado);
 
-        await db.guardarEstadoPedido(telefono, {
+        // Limpiar prefijos de domicilio del campo direccion
+      const dirLimpia = mensaje
+        .replace(/^(a domicilio|domicilio|quiero|por favor|favor)[,\s]*/i, '')
+        .trim();
+      await db.guardarEstadoPedido(telefono, {
           fase: "esperando_confirmacion_sucursal",
           sucursal_sugerida: zona,
           items,
-          direccion: mensaje,
+          direccion: dirLimpia,
           colonia: null,
           referencias: null,
         });
