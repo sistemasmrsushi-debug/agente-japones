@@ -12,12 +12,12 @@ function getTwilioClient() {
 // ── Detecta confirmacion simple ───────────────────────────────────────────────
 function esConfirmacion(texto) {
   const t = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-  // Negaciones explicitas
-  if (/\b(no|otra|diferente|cambia|prefiero|ninguna|quiero cambiar)\b/.test(t)) return false;
-  // Confirmaciones
-  if (/\b(si|ok|dale|bien|listo|claro|va|esa|ahi|perfecto|correcto|adelante|bueno|sale|andale|orale|excelente|desde ahi|esa misma|ahi mismo|ahi esta|de ahi)\b/.test(t)) return true;
-  // Mensaje muy corto sin negacion ni pregunta
-  if (t.length <= 20 && !/\b(no|cual|donde|cuando|cuanto|que|como|quien|por)\b/.test(t)) return true;
+  // Negaciones y palabras que NO son confirmacion
+  if (/\b(no|otra|diferente|cambia|prefiero|ninguna|quiero cambiar|gracias|adios|bye|hasta|de nada|ok gracias|listo gracias|perfecto gracias)\b/.test(t)) return false;
+  // Solo confirmaciones explicitas
+  if (/^(si|ok|dale|va|esa|ahi|claro|adelante|andale|orale|correcto|desde ahi|esa misma|ahi mismo|ahi esta bien|de ahi|esa esta bien|si por favor|ok dale|si dale|va dale)$/.test(t)) return true;
+  // Mensaje corto SIN palabras de cortesia o despedida
+  if (t.length <= 15 && !/\b(no|cual|donde|cuando|cuanto|que|como|quien|por|gracias|adios|bye|nada|bien|todo)\b/.test(t)) return true;
   return false;
 }
 

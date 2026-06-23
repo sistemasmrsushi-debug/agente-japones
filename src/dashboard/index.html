@@ -250,11 +250,15 @@ function filaP(p) {
   const total = Array.isArray(p.items) ? p.items.reduce((s,i)=>s+(i.precio||0)*(i.cantidad||1),0) : '—';
   const hora = new Date(p.fecha).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
   const esGerente = sesion?.rol==='gerente';
-  const acciones = esGerente ? `
-    ${p.estado==='pendiente'?`<button class="btn-accion azul" onclick="cambiarEstado('pedido','${p.id}','en_proceso')">Proceso</button>`:''}
-    ${p.estado!=='listo'&&p.estado!=='cancelado'?`<button class="btn-accion verde" onclick="cambiarEstado('pedido','${p.id}','listo')">Listo</button>`:''}
-    ${p.estado!=='cancelado'?`<button class="btn-accion rojo" onclick="cambiarEstado('pedido','${p.id}','cancelado')">Cancelar</button>`:''}
-  ` : '<span style="color:var(--muted);font-size:0.6rem">Solo lectura</span>';
+  const acciones = p.estado==='pendiente' ? `
+    <button class="btn-accion verde" onclick="aceptarPedido('${p.id}')">✓ Aceptar pedido</button>
+  ` : p.estado==='en_proceso' ? `
+    <button class="btn-accion azul" onclick="cambiarEstado('pedido','${p.id}','listo')">✓ Pedido listo</button>
+  ` : p.estado==='listo' ? `
+    <span style="color:var(--verde);font-size:0.65rem">✓ Completado</span>
+  ` : p.estado==='cancelado' ? `
+    <span style="color:var(--muted);font-size:0.65rem">Cancelado</span>
+  ` : '';
   const tipo = p.tipo==='domicilio' ? '🚚 Domicilio' : '🏪 Sucursal';
   // Telefono como link de llamada
   const telLimpio = (p.telefono_cliente||'').replace('whatsapp:','');
@@ -325,24 +329,48 @@ function cambiarTab(tab) {
   if(tab==='gerente') cargarStats();
 }
 
-function reproducirSonido() {
+let alarmaInterval = null;
+let alarmaCtx = null;
+
+function reproducirBeep() {
   try {
     const ctx = new (window.AudioContext||window.webkitAudioContext)();
-    [523,659,784].forEach((freq,i) => {
-      const osc=ctx.createOscillator(), gain=ctx.createGain();
+    [880, 1100].forEach((freq, i) => {
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
       osc.connect(gain); gain.connect(ctx.destination);
-      osc.frequency.value=freq; osc.type='sine';
-      gain.gain.setValueAtTime(0.3,ctx.currentTime+i*0.15);
-      gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+i*0.15+0.3);
-      osc.start(ctx.currentTime+i*0.15); osc.stop(ctx.currentTime+i*0.15+0.3);
+      osc.frequency.value = freq; osc.type = 'square';
+      gain.gain.setValueAtTime(0.15, ctx.currentTime + i * 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.2 + 0.15);
+      osc.start(ctx.currentTime + i * 0.2);
+      osc.stop(ctx.currentTime + i * 0.2 + 0.15);
     });
-  } catch(e){}
+  } catch(e) {}
+}
+
+function iniciarAlarma() {
+  if (alarmaInterval) return; // ya esta sonando
+  reproducirBeep();
+  alarmaInterval = setInterval(reproducirBeep, 2000);
+}
+
+function detenerAlarma() {
+  if (alarmaInterval) { clearInterval(alarmaInterval); alarmaInterval = null; }
+}
+
+function reproducirSonido() { iniciarAlarma(); }
+
+async function aceptarPedido(id) {
+  detenerAlarma();
+  cerrarAlerta();
+  await fetch(`/api/pedidos/${id}/estado`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({estado:'en_proceso'})});
+  cargarDatos();
 }
 
 function mostrarAlerta(texto) {
-  document.getElementById('alerta-texto').textContent=texto;
-  document.getElementById('alerta-banner').style.display='flex';
-  setTimeout(cerrarAlerta,8000);
+  document.getElementById('alerta-texto').textContent = texto + ' — Haz click en "Aceptar pedido"';
+  document.getElementById('alerta-banner').style.display = 'flex';
+  iniciarAlarma();
+  // NO se cierra sola — solo se cierra al aceptar el pedido
 }
 function cerrarAlerta() { document.getElementById('alerta-banner').style.display='none'; }
 </script>
