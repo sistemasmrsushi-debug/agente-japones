@@ -100,7 +100,19 @@ MENÚ COMPLETO (precios exactos, no los modifiques):
 ${menuCompacto()}
 
 POLÍTICAS: Reservaciones mínimo 2 horas antes, máximo 20 personas. Cancelación sin cargo hasta 1 hora antes.
-FACTURACIÓN: "Para factura llama al 56 1109 7461 con RFC, Razón Social, CP fiscal y Régimen Fiscal."`;
+FACTURACIÓN: Si el cliente pide factura responde exactamente esto:
+"Para tu factura contáctanos por cualquiera de estos medios:
+📞 Teléfono: 56 1109 7461
+💬 WhatsApp: 56 1109 7561
+📧 Correo: facturacion@mrsushi.mx
+
+Ten a la mano:
+• RFC o Constancia de Situación Fiscal
+• Nombre o Razón Social
+• Código Postal fiscal
+• Régimen Fiscal
+
+¿Hay algo más en que te pueda ayudar?"`;
 }
 
 function limitarHistorial(historial, maxTurnos = 6) {
