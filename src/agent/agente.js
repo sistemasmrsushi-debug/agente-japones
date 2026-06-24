@@ -96,6 +96,8 @@ REGLAS:
 - Si después de mostrar info de un platillo el cliente dice "sí", "lo quiero", "agrégalo", "ese" o similar, agrégalo al pedido y pregunta: "¿Quieres agregar algo más o con eso sería todo?"
 - El cliente puede ir acumulando platillos — lleva el conteo de todo lo que ha pedido y muéstralo al confirmar
 - Solo pregunta sucursal/domicilio cuando el cliente confirme que ya terminó de pedir
+- MENU: Si el cliente pide ver el menú, responde con las categorías disponibles y pregunta cuál le interesa. Cuando elija una categoría, lista TODOS sus platillos con nombre y precio. Al final siempre agrega: "También puedes ver nuestro menú completo con fotos en: https://www.mrsushi.mx/pedir"
+- Las categorías del menú son: Sushi 2x1, Combos, Sushi Box, Entradas, Hand Rolls, Sopas, Brochetas Kushiagues, Ensaladas, Arroz, Rollos Tradicionales, Rollos Especialidades, Bowls, Cocina Caliente, Postres, Bebidas
 
 ETIQUETAS DEL SISTEMA (invisibles para el cliente, solo al final del mensaje):
 [PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"NOMBRE_EXACTO","precio":PRECIO_EXACTO,"cantidad":1}],"tipo":"sucursal|domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"..."}}[/PEDIDO]
@@ -172,6 +174,17 @@ async function procesarMensaje(historial, mensajeNuevo) {
       .replace(/\[RESERVACION\][\s\S]*?\[\/RESERVACION\]/gi, "")
       .replace(/\[ESCALAR\][\s\S]*?\[\/ESCALAR\]/gi, "")
       .trim();
+
+    // Si el agente habla de un platillo pero no menciona precio, inyectarlo
+    if (!accion && textoLimpio && !textoLimpio.includes("$")) {
+      const platilloMencionado = buscarPlatillo(mensajeNuevo);
+      if (platilloMencionado) {
+        textoLimpio = textoLimpio.replace(
+          platilloMencionado.nombre,
+          `${platilloMencionado.nombre} ($${platilloMencionado.precio})`
+        );
+      }
+    }
 
     if (!textoLimpio || textoLimpio.length < 3) {
       textoLimpio = "¿Podrías confirmarme tu pedido? Quiero asegurarme de registrarlo correctamente.";
