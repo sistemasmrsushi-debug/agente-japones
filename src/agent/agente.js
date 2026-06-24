@@ -1,10 +1,22 @@
 // src/agent/agente.js
 const restaurante = require("../../config/restaurante");
+const menuUrls = require("../../config/menu_urls");
 const logger = require("../utils/logger");
 
 function getOpenAI() {
   const OpenAI = require("openai");
   return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+}
+
+// ── URLS DEL MENU ────────────────────────────────────────────────────────────
+function getUrlPlatillo(nombre) {
+  const t = nombre.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  for (const [key, url] of Object.entries(menuUrls)) {
+    if (key.startsWith("_")) continue;
+    const k = key.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+    if (k === t || k.includes(t) || t.includes(k)) return url;
+  }
+  return menuUrls["_menu_completo"];
 }
 
 // ── INDICE DE PLATILLOS ───────────────────────────────────────────────────────
@@ -14,7 +26,7 @@ function buscarPlatillo(nombre) {
     for (const item of items) {
       const k = item.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       if (k === t || k.includes(t) || t.includes(k)) {
-        return { ...item, categoria: cat };
+        return { ...item, categoria: cat, url: getUrlPlatillo(item.nombre) };
       }
     }
   }
@@ -23,7 +35,11 @@ function buscarPlatillo(nombre) {
 
 function menuCompacto() {
   return Object.entries(restaurante.menu)
-    .map(([cat, items]) => `[${cat}]: ${items.map(i => `${i.nombre} $${i.precio}${i.descripcion ? " ("+i.descripcion+")" : ""}`).join(" | ")}`)
+    .map(([cat, items]) => `[${cat}]: ${items.map(i => {
+      const url = getUrlPlatillo(i.nombre);
+      const desc = i.descripcion ? " ("+i.descripcion+")" : "";
+      return `${i.nombre} $${i.precio}${desc} | ver: ${url}`;
+    }).join(" || ")}`)
     .join("\n");
 }
 
@@ -86,6 +102,7 @@ REGLAS:
 - Si el cliente menciona algo que no está en el menú, díselo amablemente
 - Entiende lenguaje informal, errores de tipeo y expresiones mexicanas
 - Si el cliente confirma con "sí", "va", "dale", "esa mera", "órale", "sale" o similares, tómalo como confirmación
+- Cuando el cliente pregunte por información de un platillo específico, incluye al final: "Puedes verlo aquí: [URL]" usando la URL del platillo
 
 ETIQUETAS DEL SISTEMA (invisibles para el cliente, solo al final del mensaje):
 [PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"NOMBRE_EXACTO","precio":PRECIO_EXACTO,"cantidad":1}],"tipo":"sucursal|domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"..."}}[/PEDIDO]
