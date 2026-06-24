@@ -1,22 +1,10 @@
 // src/agent/agente.js
 const restaurante = require("../../config/restaurante");
-const menuUrls = require("../../config/menu_urls");
 const logger = require("../utils/logger");
 
 function getOpenAI() {
   const OpenAI = require("openai");
   return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-}
-
-// ── URLS DEL MENU ────────────────────────────────────────────────────────────
-function getUrlPlatillo(nombre) {
-  const t = nombre.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-  for (const [key, url] of Object.entries(menuUrls)) {
-    if (key.startsWith("_")) continue;
-    const k = key.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-    if (k === t || k.includes(t) || t.includes(k)) return url;
-  }
-  return menuUrls["_menu_completo"];
 }
 
 // ── INDICE DE PLATILLOS ───────────────────────────────────────────────────────
@@ -27,8 +15,7 @@ function buscarPlatillo(nombre) {
     for (const item of items) {
       const k = item.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       if (k === t || k.includes(t) || t.includes(k)) {
-        const match = { ...item, categoria: cat, url: getUrlPlatillo(item.nombre) };
-        // Priorizar categoria 2x1 si existe
+        const match = { ...item, categoria: cat };
         if (cat === "Sushi 2x1") return match;
         if (!resultado) resultado = match;
       }
@@ -40,10 +27,9 @@ function buscarPlatillo(nombre) {
 function menuCompacto() {
   return Object.entries(restaurante.menu)
     .map(([cat, items]) => `[${cat}]: ${items.map(i => {
-      const url = getUrlPlatillo(i.nombre);
       const desc = i.descripcion ? " ("+i.descripcion+")" : "";
-      return `${i.nombre} $${i.precio}${desc} | ver: ${url}`;
-    }).join(" || ")}`)
+      return `${i.nombre} $${i.precio}${desc}`;
+    }).join(" | ")}`)
     .join("\n");
 }
 
@@ -106,10 +92,10 @@ REGLAS:
 - Si el cliente menciona algo que no está en el menú, díselo amablemente
 - Entiende lenguaje informal, errores de tipeo y expresiones mexicanas
 - Si el cliente confirma con "sí", "va", "dale", "esa mera", "órale", "sale" o similares, tómalo como confirmación
-- Cuando el cliente pregunte por información de un platillo específico, incluye al final la URL PLANA sin formato Markdown, así: "Puedes verlo aquí: https://www.mrsushi.mx/pedir/..." — NUNCA uses formato [texto](url)
-- Si después de mostrar info de un platillo el cliente dice "sí", "lo quiero", "agrégalo", "ese" o similar, agrégalo al pedido y pregunta: "¿Quieres agregar algo más a tu pedido o con eso sería todo?"
-- El cliente puede ir acumulando platillos — lleva el conteo de todo lo que ha pedido en la conversación y muéstralo al confirmar
-- Solo pregunta sucursal/domicilio cuando el cliente diga que ya terminó de pedir o confirme que es todo
+- Cuando el cliente pregunte por información de un platillo, responde con: nombre, precio exacto y descripción completa. Ejemplo: "El Sushi Spicy Tuna cuesta $279. Lleva atún picante con teriyaki..."
+- Si después de mostrar info de un platillo el cliente dice "sí", "lo quiero", "agrégalo", "ese" o similar, agrégalo al pedido y pregunta: "¿Quieres agregar algo más o con eso sería todo?"
+- El cliente puede ir acumulando platillos — lleva el conteo de todo lo que ha pedido y muéstralo al confirmar
+- Solo pregunta sucursal/domicilio cuando el cliente confirme que ya terminó de pedir
 
 ETIQUETAS DEL SISTEMA (invisibles para el cliente, solo al final del mensaje):
 [PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"NOMBRE_EXACTO","precio":PRECIO_EXACTO,"cantidad":1}],"tipo":"sucursal|domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"..."}}[/PEDIDO]
