@@ -4,6 +4,7 @@ const router = express.Router();
 const { procesarMensaje, detectarSucursalPorZona, buscarPlatillo } = require("../agent/agente");
 const logger = require("../utils/logger");
 const db = require("../db/database");
+const { validarDireccion } = require("../utils/geocoding");
 
 function getTwilioClient() {
   return require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -120,7 +121,11 @@ router.post("/webhook", async (req, res) => {
         direccion: estado.direccion || null,
         colonia: estado.colonia || null,
         referencias: estado.referencias || null,
-        ubicacion_gps: null,
+        ubicacion_gps: estado.coords ? {
+          latitude: estado.coords.lat,
+          longitude: estado.coords.lng,
+          maps_url: estado.maps_url || `https://maps.google.com/?q=${estado.coords.lat},${estado.coords.lng}`
+        } : null,
       };
       await db.guardarPedido(pedido);
       await db.eliminarEstadoPedido(telefono);
@@ -142,31 +147,42 @@ router.post("/webhook", async (req, res) => {
     }
 
     // ── CASO 2: Cliente da su direccion (viene del flujo normal) ──────────
-    // El agente ya pregunto la direccion en el paso anterior
-    // Aqui detectamos si el mensaje ES una direccion y el estado es "esperando_direccion"
     if (estado?.fase === "esperando_direccion" && tieneDireccion(mensaje)) {
-      const zona = detectarSucursalPorZona(mensaje);
-      const sucursalSugerida = zona || "Por confirmar";
-      logger.info(`Direccion recibida. Zona: ${sucursalSugerida}`);
+      logger.info(`Direccion recibida, validando con Google Maps...`);
 
-      // Actualizar estado con la direccion y nueva fase
-      const dirLimpia2 = mensaje
-        .replace(/^(a domicilio|domicilio|quiero|por favor|favor)[,\s]*/i, '')
-        .trim();
+      // Validar direccion con Google Maps
+      const geoResult = await validarDireccion(mensaje);
+
+      if (!geoResult.valida) {
+        await enviarMensaje(telefono,
+          `No encontramos esa direccion. Por favor verifica e intenta de nuevo con calle, numero, colonia y municipio.`
+        );
+        return;
+      }
+
+      // Usar direccion normalizada por Google
+      const dirFinal = geoResult.direccion;
+      const zona = detectarSucursalPorZona(dirFinal) || detectarSucursalPorZona(mensaje);
+      const sucursalSugerida = zona || "Por confirmar";
+      logger.info(`Direccion validada: "${dirFinal}" -> Zona: ${sucursalSugerida}`);
+
       await db.guardarEstadoPedido(telefono, {
         ...estado,
         fase: "esperando_confirmacion_sucursal",
         sucursal_sugerida: sucursalSugerida,
-        direccion: dirLimpia2,
+        direccion: dirFinal,
+        colonia: geoResult.colonia || null,
+        coords: geoResult.coords || null,
+        maps_url: geoResult.maps_url || null,
       });
 
       if (zona) {
         await enviarMensaje(telefono,
-          `La sucursal mas cercana a tu zona es *${zona}*. Te enviamos desde ahi o prefieres otra?`
+          `Direccion confirmada: ${dirFinal}\n\nLa sucursal mas cercana a tu zona es *${zona}*. Te enviamos desde ahi o prefieres otra?`
         );
       } else {
         await enviarMensaje(telefono,
-          `Recibimos tu direccion. Cual sucursal prefieres? Tenemos: ${require("../../config/restaurante").sucursales.map(s=>s.nombre).join(", ")}`
+          `Direccion confirmada: ${dirFinal}\n\nCual sucursal prefieres? Tenemos: ${require("../../config/restaurante").sucursales.map(s=>s.nombre).join(", ")}`
         );
       }
       return;
@@ -174,11 +190,16 @@ router.post("/webhook", async (req, res) => {
 
     // ── CASO 3: Domicilio + direccion en mismo mensaje ────────────────────
     if (pideDomicilio(mensaje) && tieneDireccion(mensaje)) {
-      const zona = detectarSucursalPorZona(mensaje);
+      const historial = await db.obtenerHistorial(telefono);
+      const resultado = await procesarMensaje(historial, mensaje);
+      await db.guardarHistorial(telefono, resultado.historialActualizado);
+
+      // Validar direccion con Google Maps
+      const geoResult = await validarDireccion(mensaje);
+      const dirFinal = geoResult.valida ? geoResult.direccion : mensaje;
+      const zona = detectarSucursalPorZona(dirFinal) || detectarSucursalPorZona(mensaje);
+
       if (zona) {
-        const historial = await db.obtenerHistorial(telefono);
-        const resultado = await procesarMensaje(historial, mensaje);
-        await db.guardarHistorial(telefono, resultado.historialActualizado);
         const items = resultado.datos?.pedido?.items
           ? resultado.datos.pedido.items.map(i => {
               const real = buscarPlatillo(i.nombre);
@@ -186,17 +207,14 @@ router.post("/webhook", async (req, res) => {
             })
           : extraerItemsConPreciosReales(resultado.historialActualizado);
 
-        // Limpiar prefijos de domicilio del campo direccion
-      const dirLimpia = mensaje
-        .replace(/^(a domicilio|domicilio|quiero|por favor|favor)[,\s]*/i, '')
-        .trim();
-      await db.guardarEstadoPedido(telefono, {
+        await db.guardarEstadoPedido(telefono, {
           fase: "esperando_confirmacion_sucursal",
           sucursal_sugerida: zona,
           items,
-          direccion: dirLimpia,
-          colonia: null,
-          referencias: null,
+          direccion: dirFinal,
+          colonia: geoResult.colonia || null,
+          coords: geoResult.coords || null,
+          maps_url: geoResult.maps_url || null,
         });
         logger.info(`Estado guardado (caso3): ${zona}, items: ${items.length}`);
         await enviarMensaje(telefono,
