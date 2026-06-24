@@ -23,7 +23,7 @@ function buscarPlatillo(nombre) {
 
 function menuCompacto() {
   return Object.entries(restaurante.menu)
-    .map(([cat, items]) => `[${cat}]: ${items.map(i => `${i.nombre} $${i.precio}`).join(" | ")}`)
+    .map(([cat, items]) => `[${cat}]: ${items.map(i => `${i.nombre} $${i.precio}${i.descripcion ? " ("+i.descripcion+")" : ""}`).join(" | ")}`)
     .join("\n");
 }
 
