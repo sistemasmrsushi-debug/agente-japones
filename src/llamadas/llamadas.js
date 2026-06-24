@@ -105,9 +105,12 @@ function responder(res, twiml) {
   res.type("text/xml").send(twiml.toString());
 }
 
-router.post("/llamada/entrante", (req, res) => {
+router.post("/llamada/entrante", async (req, res) => {
   const telefono = req.body.From || "desconocido";
   logger.info(`Llamada entrante: ${telefono}`);
+  // Limpiar estado anterior al iniciar nueva llamada
+  await eliminarEstadoLlamada(telefono);
+  await db.guardarHistorial(telefono + "_llamada", []);
   const twilio = getTwilio();
   const twiml = new twilio.twiml.VoiceResponse();
   const gather = crearGather(twiml);
@@ -165,7 +168,8 @@ router.post("/llamada/respuesta", async (req, res) => {
 
     // Estado: esperando confirmacion de sucursal
     if (estado?.fase === "esperando_confirmacion_sucursal") {
-      const confirmacion = /\b(si|ok|dale|claro|adelante|confirma|va|correcto)\b/i.test(textoCliente);
+      const esDespedida = /\b(gracias|adios|bye|hasta luego|de nada|muchas gracias)\b/i.test(textoCliente);
+      const confirmacion = !esDespedida && /\b(si|ok|dale|claro|adelante|confirma|va|correcto|esa|desde ahi)\b/i.test(textoCliente);
       if (confirmacion) {
         const items = estado.items || [];
         const pedido = {
