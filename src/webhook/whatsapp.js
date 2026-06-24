@@ -75,7 +75,12 @@ router.post("/webhook", async (req, res) => {
     }
 
     const mensaje = req.body.Body;
-    if (!mensaje) return;
+    if (!mensaje || mensaje.trim().length === 0) return;
+    // Ignorar mensajes que son solo puntuacion o simbolos sin contenido real
+    if (/^[?!.,;:\-_*#@$%^&()]+$/.test(mensaje.trim())) {
+      logger.info(`Mensaje ignorado (solo simbolos): "${mensaje}"`);
+      return;
+    }
     logger.info(`Msg de ${telefono}: ${mensaje.substring(0, 80)}`);
 
     // ── CASO 1: Cliente confirma sucursal sugerida ────────────────────────
