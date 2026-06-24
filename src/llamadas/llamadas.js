@@ -143,6 +143,7 @@ router.post("/llamada/respuesta", async (req, res) => {
 
   try {
     const estado = await obtenerEstadoLlamada(telefono);
+    logger.info(`[${telefono}] Estado actual: ${estado ? JSON.stringify(estado.fase) : "null"}`);
     const tieneDireccion = /\b(calle|avenida|av[. ]|col[. ]|colonia|blvd|calzada|\d{5})\b/i.test(textoCliente);
     const zona = tieneDireccion ? detectarSucursalPorZona(textoCliente) : null;
 
