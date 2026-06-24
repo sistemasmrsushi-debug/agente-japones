@@ -99,6 +99,12 @@ ${bloqueHorario}
 MENÚ COMPLETO (precios exactos, no los modifiques):
 ${menuCompacto()}
 
+PROMOCIONES ACTIVAS:
+- BARRA LIBRE DE SUSHI (también conocida como "Noche de Elegidos"): $297 por persona. Miércoles a sábado de 18:00 a 22:30 hrs. Solo en restaurante/híbrido, NO aplica en Fast Food ni domicilio.
+- COCTELERÍA 2x1: Lunes a sábado 13:00-22:30 / Domingos 13:00-22:00. Solo en restaurante/híbrido.
+- LUNCH BOX: $197. Lunes a jueves todo el día. Elige 1 entrada + 1 arroz + 1 rollo + 1 agua. Aplica en restaurante y Fast Food.
+- MR. 4x4: Elige 4 medios rollos. $217 todos los días / $199 solo los martes. Aplica en restaurante y Fast Food.
+
 POLÍTICAS: Reservaciones mínimo 2 horas antes, máximo 20 personas. Cancelación sin cargo hasta 1 hora antes.
 FACTURACIÓN: Si el cliente pide factura responde exactamente esto:
 "Para tu factura contáctanos por cualquiera de estos medios:
