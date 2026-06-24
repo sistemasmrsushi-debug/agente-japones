@@ -22,15 +22,19 @@ function getUrlPlatillo(nombre) {
 // ── INDICE DE PLATILLOS ───────────────────────────────────────────────────────
 function buscarPlatillo(nombre) {
   const t = nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  let resultado = null;
   for (const [cat, items] of Object.entries(restaurante.menu)) {
     for (const item of items) {
       const k = item.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       if (k === t || k.includes(t) || t.includes(k)) {
-        return { ...item, categoria: cat, url: getUrlPlatillo(item.nombre) };
+        const match = { ...item, categoria: cat, url: getUrlPlatillo(item.nombre) };
+        // Priorizar categoria 2x1 si existe
+        if (cat === "Sushi 2x1") return match;
+        if (!resultado) resultado = match;
       }
     }
   }
-  return null;
+  return resultado;
 }
 
 function menuCompacto() {
