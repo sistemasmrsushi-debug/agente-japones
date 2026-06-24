@@ -68,7 +68,7 @@ router.post("/llamada/respuesta", async (req, res) => {
 
   if (!textoCliente.trim()) {
     const g = crearGather(twiml);
-    g.say({ language:"es-MX", voice:"Polly.Mia" }, ssml("No te escuché. ¿Me puedes repetir?"));
+    g.say({ language:"es-MX", voice:"Polly.Mia" }, ssml("No te escuche. Me puedes repetir?"));
     return responder(res, twiml);
   }
 
@@ -134,22 +134,20 @@ router.post("/llamada/respuesta", async (req, res) => {
     const historial = conversaciones.get(telefono) || [];
 
     // Prompt especial para llamadas: sin ingredientes, respuestas cortas
-    const mensajeConContexto = `[LLAMADA DE VOZ - responde MUY BREVE, sin ingredientes ni descripciones largas, máximo 2 oraciones por respuesta] ${textoCliente}`;
+    const mensajeConContexto = `[LLAMADA DE VOZ - responde MUY BREVE, sin ingredientes ni descripciones largas, maximo 2 oraciones por respuesta] ${textoCliente}`;
 
     const resultado = await procesarMensaje(historial, mensajeConContexto);
     conversaciones.set(telefono, resultado.historialActualizado);
 
-    // Si el agente pide direccion, guardar estado con los items
+    // Si el agente pide direccion, guardar estado con los items (aunque esten vacios)
     const textoBajo = resultado.texto.toLowerCase();
     if (/direcci[oó]n|colonia|domicilio/.test(textoBajo) && !estado) {
       const items = resultado.datos?.pedido?.items || [];
-      if (items.length > 0) {
-        estadosLlamada.set(telefono, {
-          fase: "esperando_direccion",
-          items,
-        });
-        logger.info(`Estado llamada guardado: esperando_direccion`);
-      }
+      estadosLlamada.set(telefono, {
+        fase: "esperando_direccion",
+        items,
+      });
+      logger.info(`Estado llamada guardado: esperando_direccion, items: ${items.length}`);
     }
 
     // Si el agente sugiere sucursal, guardar estado
@@ -157,7 +155,7 @@ router.post("/llamada/respuesta", async (req, res) => {
       const items = resultado.datos?.pedido?.items || [];
       const sucursalEnTexto = require("../../config/restaurante").sucursales
         .find(s => textoBajo.includes(s.nombre.toLowerCase()));
-      if (sucursalEnTexto && items.length > 0) {
+      if (sucursalEnTexto) {
         estadosLlamada.set(telefono, {
           fase: "esperando_confirmacion_sucursal",
           items,
