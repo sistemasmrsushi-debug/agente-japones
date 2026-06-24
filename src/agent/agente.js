@@ -10,10 +10,10 @@ function getOpenAI() {
 
 // ── URLS DEL MENU ────────────────────────────────────────────────────────────
 function getUrlPlatillo(nombre) {
-  const t = nombre.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const t = nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   for (const [key, url] of Object.entries(menuUrls)) {
     if (key.startsWith("_")) continue;
-    const k = key.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+    const k = key.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     if (k === t || k.includes(t) || t.includes(k)) return url;
   }
   return menuUrls["_menu_completo"];
