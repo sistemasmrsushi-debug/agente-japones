@@ -307,12 +307,43 @@ async function ejecutarAccion(accion, datos, telefono) {
 async function enviarMensaje(telefono, texto) {
   try {
     const client = getTwilioClient();
-    await client.messages.create({
-      from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
-      to: telefono,
-      body: texto,
-    });
-    logger.info(`Enviado a ${telefono}`);
+    const LIMITE = 1500;
+
+    if (texto.length <= LIMITE) {
+      await client.messages.create({
+        from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
+        to: telefono,
+        body: texto,
+      });
+      logger.info(`Enviado a ${telefono}`);
+      return;
+    }
+
+    // Dividir por saltos de linea respetando el limite
+    const partes = [];
+    const lineas = texto.split("\n");
+    let parteActual = "";
+
+    for (const linea of lineas) {
+      if ((parteActual + "\n" + linea).length > LIMITE) {
+        if (parteActual) partes.push(parteActual.trim());
+        parteActual = linea;
+      } else {
+        parteActual = parteActual ? parteActual + "\n" + linea : linea;
+      }
+    }
+    if (parteActual) partes.push(parteActual.trim());
+
+    // Enviar cada parte con delay de 500ms
+    for (let i = 0; i < partes.length; i++) {
+      if (i > 0) await new Promise(r => setTimeout(r, 500));
+      await client.messages.create({
+        from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
+        to: telefono,
+        body: partes[i],
+      });
+      logger.info(`Enviado parte ${i+1}/${partes.length} a ${telefono}`);
+    }
   } catch (error) {
     logger.error(`Error enviando: ` + error.message);
   }
