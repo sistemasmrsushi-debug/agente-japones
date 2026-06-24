@@ -1,141 +1,220 @@
 // src/agent/agente.js
 const restaurante = require("../../config/restaurante");
+const menuUrls = require("../../config/menu_urls");
 const logger = require("../utils/logger");
 
-function getGroq() {
-  if (!process.env.GROQ_API_KEY || process.env.GROQ_API_KEY.trim() === "") {
-    throw new Error("Configura GROQ_API_KEY en tus variables de entorno");
-  }
-  const Groq = require("groq-sdk");
-  return new Groq({ apiKey: process.env.GROQ_API_KEY });
+function getOpenAI() {
+  const OpenAI = require("openai");
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 }
 
-function buildSystemPrompt() {
-  const menuTexto = Object.entries(restaurante.menu)
-    .map(([categoria, items]) => {
-      const lista = items.map(i => `  - ${i.nombre}: $${i.precio} - ${i.descripcion}`).join("\n");
-      return `${categoria}:\n${lista}`;
-    }).join("\n\n");
+// ── URLS DEL MENU ────────────────────────────────────────────────────────────
+function getUrlPlatillo(nombre) {
+  const t = nombre.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  for (const [key, url] of Object.entries(menuUrls)) {
+    if (key.startsWith("_")) continue;
+    const k = key.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+    if (k === t || k.includes(t) || t.includes(k)) return url;
+  }
+  return menuUrls["_menu_completo"];
+}
 
-  const sucursalesTexto = restaurante.sucursales
-    .map(s => `  - ${s.nombre} (${s.zona}): ${s.direccion}`).join("\n");
+// ── INDICE DE PLATILLOS ───────────────────────────────────────────────────────
+function buscarPlatillo(nombre) {
+  const t = nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  let resultado = null;
+  for (const [cat, items] of Object.entries(restaurante.menu)) {
+    for (const item of items) {
+      const k = item.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (k === t || k.includes(t) || t.includes(k)) {
+        const match = { ...item, categoria: cat, url: getUrlPlatillo(item.nombre) };
+        // Priorizar categoria 2x1 si existe
+        if (cat === "Sushi 2x1") return match;
+        if (!resultado) resultado = match;
+      }
+    }
+  }
+  return resultado;
+}
 
-  return `Eres el asistente virtual de ${restaurante.nombre}, restaurante japonés.
+function menuCompacto() {
+  return Object.entries(restaurante.menu)
+    .map(([cat, items]) => `[${cat}]: ${items.map(i => {
+      const url = getUrlPlatillo(i.nombre);
+      const desc = i.descripcion ? " ("+i.descripcion+")" : "";
+      return `${i.nombre} $${i.precio}${desc} | ver: ${url}`;
+    }).join(" || ")}`)
+    .join("\n");
+}
 
-REGLA #1 — LA MÁS IMPORTANTE:
-Lee TODA la conversación antes de responder.
-Si el cliente YA respondió algo, NO lo vuelvas a preguntar JAMÁS.
-Si ya dijo "recoger" o "sucursal" → NO preguntes de nuevo si es recoger o domicilio.
-Si ya dio su dirección → NO la vuelvas a pedir.
-Si ya dijo qué sucursal → NO preguntes de nuevo.
+// ── ZONA DOMICILIO ────────────────────────────────────────────────────────────
+function detectarSucursalPorZona(texto) {
+  if (!texto) return null;
+  const t = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  let mejorMatch = null;
+  let mejorLongitud = 0;
+  for (const zona of (restaurante.zonas_domicilio || [])) {
+    for (const keyword of zona.keywords) {
+      const kw = keyword.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (t.includes(kw) && kw.length > mejorLongitud) {
+        mejorMatch = zona.sucursal;
+        mejorLongitud = kw.length;
+      }
+    }
+  }
+  if (mejorMatch) logger.info(`Zona detectada: "${mejorMatch}" (${mejorLongitud} chars)`);
+  return mejorMatch;
+}
 
-FLUJO CORRECTO:
-Paso 1 → Cliente pide productos
-Paso 2 → Preguntas UNA SOLA VEZ: ¿recoger en sucursal o a domicilio?
-Paso 3a → Si dice sucursal: preguntas UNA SOLA VEZ en cuál sucursal (si no lo dijo)
-Paso 3b → Si dice domicilio: pides dirección UNA SOLA VEZ
-Paso 4 → Cuando tengas TODOS los datos: productos + tipo + sucursal/dirección → REGISTRAS EL PEDIDO INMEDIATAMENTE
+function detectarSucursalMencionada(mensaje) {
+  const texto = mensaje.toLowerCase();
+  return restaurante.sucursales.find(s => texto.includes(s.nombre.toLowerCase()));
+}
 
-NUNCA:
-- Preguntes lo mismo dos veces
-- Preguntes "¿deseas confirmar?"
-- Muestres el JSON al cliente
+function listaSucursalesCorta() {
+  return restaurante.sucursales.map(s => s.nombre).join(", ");
+}
 
-CÓMO REGISTRAR UN PEDIDO:
-Escribe primero el mensaje de confirmación al cliente, luego agrega la etiqueta oculta:
-[PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"nombre","precio":0,"cantidad":1}],"tipo":"sucursal","sucursal":"nombre sucursal"}}[/PEDIDO]
+// ── SYSTEM PROMPT ─────────────────────────────────────────────────────────────
+function buildSystemPrompt(sucursalRelevante) {
+  let bloqueHorario = "";
+  if (sucursalRelevante) {
+    const horario = sucursalRelevante.horario_propio || restaurante.horario_general;
+    const h = Object.entries(horario).map(([d,v]) => `${d.slice(0,3)} ${v.abre}-${v.cierra}`).join(", ");
+    bloqueHorario = `\nHORARIO ${sucursalRelevante.nombre}: ${h}`;
+  }
 
-Para domicilio:
-[PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"nombre","precio":0,"cantidad":1}],"tipo":"domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"domicilio"}}[/PEDIDO]
+  return `Eres el asistente virtual de Mr. Sushi, restaurante japonés. Responde siempre en español, de forma breve y natural. NUNCA muestres etiquetas al cliente.
 
-Para reservación:
+FLUJO DE PEDIDO — sigue este orden estrictamente:
+1. SALUDO:
+   - Si el cliente SOLO saluda ("hola", "buenas tardes", "buenos días"): preséntate con las opciones disponibles
+   - Si el cliente menciona que quiere pedir, ordenar, hacer un pedido, o pide un platillo directamente: responde ÚNICAMENTE "¡Claro! ¿Qué te gustaría pedir?" sin dar bienvenida
+   - Si dice "quiero hacer otro pedido" o similar: responde ÚNICAMENTE "¡Claro! ¿Qué te gustaría pedir?"
+2. PRODUCTOS: Confirma los platillos con nombre y precio exacto del menú. Pregunta: "¿Lo quieres recoger en sucursal o te lo enviamos a domicilio?"
+3. TIPO DE ENTREGA:
+   - SUCURSAL: pregunta en cuál sucursal
+   - DOMICILIO: pregunta la dirección completa con colonia y referencia. NO sugieras sucursal todavía.
+4. DIRECCIÓN: cuando el cliente la dé, responde "Un momento, busco la sucursal más cercana a tu zona."
+5. El sistema detectará automáticamente la sucursal más cercana.
+6. CONFIRMAR: cuando el cliente confirme la sucursal, genera la etiqueta [PEDIDO].
+
+REGLAS:
+- NUNCA sugieras sucursal sin tener la dirección primero
+- NUNCA inventes precios — usa exactamente los del menú
+- NUNCA mezcles categorías del menú
+- Si el cliente menciona algo que no está en el menú, díselo amablemente
+- Entiende lenguaje informal, errores de tipeo y expresiones mexicanas
+- Si el cliente confirma con "sí", "va", "dale", "esa mera", "órale", "sale" o similares, tómalo como confirmación
+- Cuando el cliente pregunte por información de un platillo específico, incluye al final la URL PLANA sin formato Markdown, así: "Puedes verlo aquí: https://www.mrsushi.mx/pedir/..." — NUNCA uses formato [texto](url)
+- Si después de mostrar info de un platillo el cliente dice "sí", "lo quiero", "agrégalo", "ese" o similar, agrégalo al pedido y pregunta: "¿Quieres agregar algo más a tu pedido o con eso sería todo?"
+- El cliente puede ir acumulando platillos — lleva el conteo de todo lo que ha pedido en la conversación y muéstralo al confirmar
+- Solo pregunta sucursal/domicilio cuando el cliente diga que ya terminó de pedir o confirme que es todo
+
+ETIQUETAS DEL SISTEMA (invisibles para el cliente, solo al final del mensaje):
+[PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"NOMBRE_EXACTO","precio":PRECIO_EXACTO,"cantidad":1}],"tipo":"sucursal|domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"..."}}[/PEDIDO]
 [RESERVACION]{"accion":"REGISTRAR_RESERVACION","reservacion":{"nombre":"...","fecha":"...","hora":"...","personas":0,"sucursal":"..."}}[/RESERVACION]
-
-Para escalar a humano:
 [ESCALAR]{"accion":"ESCALAR_HUMANO","motivo":"..."}[/ESCALAR]
 
-Horario: ${restaurante.horario}
+DOMICILIO: Envío gratis | ~40 min | Sin restricciones de zona
+SUCURSALES: ${listaSucursalesCorta()}
+${bloqueHorario}
 
-DOMICILIO: Envío GRATIS · 40 minutos · Sin restricciones de zona
+MENÚ COMPLETO (precios exactos, no los modifiques):
+${menuCompacto()}
 
-MENÚ:
-${menuTexto}
+PROMOCIONES ACTIVAS:
+- BARRA LIBRE DE SUSHI (tambien conocida como "Noche de Elegidos"): $297 por persona. Miercoles a sabado de 18:00 a 22:30 hrs. Solo en restaurante/hibrido, NO aplica en Fast Food ni domicilio.
+- COCTELERIA 2x1: Lunes a sabado 13:00-22:30 / Domingos 13:00-22:00. Solo en restaurante/hibrido.
+- LUNCH BOX: $197. Lunes a jueves todo el dia. Elige 1 entrada + 1 arroz + 1 rollo + 1 agua. Aplica en restaurante y Fast Food.
+- MR. 4x4: Elige 4 medios rollos. $217 todos los dias / $199 solo los martes. Aplica en restaurante y Fast Food.
 
-SUCURSALES:
-${sucursalesTexto}
+POLÍTICAS: Reservaciones mínimo 2 horas antes, máximo 20 personas. Cancelación sin cargo hasta 1 hora antes.
+FACTURACIÓN: Si el cliente pide factura responde exactamente esto:
+"Para tu factura contáctanos por cualquiera de estos medios:
+📞 Teléfono / WhatsApp: 56 1109 7561
+📧 Correo: facturacion@mrsushi.mx
 
-POLÍTICAS:
-- Reservaciones: ${restaurante.politicas.reservaciones}
-- Cancelaciones: ${restaurante.politicas.cancelaciones}
-- Tiempo espera: ${restaurante.politicas.tiempo_espera_pedido}`;
+Para agilizar el proceso ten a la mano:
+• Foto de tu nota o ticket de compra
+• RFC o Constancia de Situación Fiscal
+• Nombre o Razón Social
+• Código Postal fiscal
+• Régimen Fiscal
+
+¿Hay algo más en que te pueda ayudar?"`;
+}
+
+function limitarHistorial(historial, maxTurnos = 6) {
+  const max = maxTurnos * 2;
+  return historial.length <= max ? historial : historial.slice(-max);
 }
 
 async function procesarMensaje(historial, mensajeNuevo) {
   try {
-    const groq = getGroq();
-    const messages = [
-      { role: "system", content: buildSystemPrompt() },
-      ...historial.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })),
-      { role: "user", content: mensajeNuevo },
-    ];
+    const openai = getOpenAI();
+    const historialLimitado = limitarHistorial(historial);
+    const textoReciente = [mensajeNuevo, ...historialLimitado.slice(-2).map(m => m.content)].join(" ");
+    const sucursalRelevante = detectarSucursalMencionada(textoReciente);
 
-    const response = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",
-      messages,
-      max_tokens: 1024,
-      temperature: 0.1,
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: buildSystemPrompt(sucursalRelevante) },
+        ...historialLimitado.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })),
+        { role: "user", content: mensajeNuevo },
+      ],
+      max_tokens: 800,
+      temperature: 0.2,
     });
 
-    const textoRespuesta = response.choices[0].message.content;
-    logger.info(`Respuesta Groq: ${textoRespuesta.substring(0, 150)}`);
-
+    let textoRespuesta = response.choices[0].message.content;
     const accion = detectarAccion(textoRespuesta);
 
-    // Limpiar etiquetas del texto visible al cliente
-    const textoLimpio = textoRespuesta
-      .replace(/\[PEDIDO\][\s\S]*?\[\/PEDIDO\]/g, "")
-      .replace(/\[RESERVACION\][\s\S]*?\[\/RESERVACION\]/g, "")
-      .replace(/\[ESCALAR\][\s\S]*?\[\/ESCALAR\]/g, "")
+    // Corregir precios usando el índice real del menú
+    if (accion?.datos?.pedido?.items) {
+      accion.datos.pedido.items = accion.datos.pedido.items.map(item => {
+        const encontrado = buscarPlatillo(item.nombre);
+        return encontrado
+          ? { nombre: encontrado.nombre, precio: encontrado.precio, cantidad: item.cantidad || 1 }
+          : item;
+      });
+    }
+
+    let textoLimpio = textoRespuesta
+      .replace(/\[PEDIDO\][\s\S]*?\[\/PEDIDO\]/gi, "")
+      .replace(/\[RESERVACION\][\s\S]*?\[\/RESERVACION\]/gi, "")
+      .replace(/\[ESCALAR\][\s\S]*?\[\/ESCALAR\]/gi, "")
       .trim();
+
+    if (!textoLimpio || textoLimpio.length < 3) {
+      textoLimpio = "¿Podrías confirmarme tu pedido? Quiero asegurarme de registrarlo correctamente.";
+    }
 
     return {
       texto: textoLimpio,
-      accion: accion ? accion.tipo : null,
-      datos: accion ? accion.datos : null,
+      accion: accion?.tipo || null,
+      datos: accion?.datos || null,
       historialActualizado: [
         ...historial,
-        { role: "user",      content: mensajeNuevo },
-        { role: "assistant", content: textoRespuesta },
+        { role: "user", content: mensajeNuevo },
+        { role: "assistant", content: textoRespuesta }
       ],
     };
   } catch (error) {
-    logger.error("Error en agente Groq: " + error.message);
+    logger.error("Error agente: " + error.message);
     throw error;
   }
 }
 
 function detectarAccion(texto) {
   try {
-    const pedidoMatch  = texto.match(/\[PEDIDO\]([\s\S]*?)\[\/PEDIDO\]/);
-    const reservaMatch = texto.match(/\[RESERVACION\]([\s\S]*?)\[\/RESERVACION\]/);
-    const escalarMatch = texto.match(/\[ESCALAR\]([\s\S]*?)\[\/ESCALAR\]/);
-
-    let jsonStr = null;
-    if (pedidoMatch)  jsonStr = pedidoMatch[1];
-    if (reservaMatch) jsonStr = reservaMatch[1];
-    if (escalarMatch) jsonStr = escalarMatch[1];
-
-    if (!jsonStr) return null;
-
-    const datos = JSON.parse(jsonStr.trim());
-    if (!datos.accion) return null;
-
-    logger.info(`Acción detectada: ${datos.accion}`);
+    const m = texto.match(/\[(PEDIDO|RESERVACION|ESCALAR)\]([\s\S]*?)\[\/\1\]/i);
+    if (!m) return null;
+    const datos = JSON.parse(m[2].trim());
+    logger.info(`Accion: ${datos.accion}`);
     return { tipo: datos.accion, datos };
-  } catch(e) {
-    logger.error("Error detectando acción: " + e.message);
-    return null;
-  }
+  } catch(e) { return null; }
 }
 
-module.exports = { procesarMensaje };
+module.exports = { procesarMensaje, detectarSucursalPorZona, buscarPlatillo };
