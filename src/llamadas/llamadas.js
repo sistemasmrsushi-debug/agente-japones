@@ -35,7 +35,6 @@ function crearGather(twiml, accion = "/llamada/respuesta") {
     language: "es-MX",
     speechTimeout: "1",        // reducido de 3 a 1 segundo
     speechModel: "phone_call",
-    enhanced: "true",           // mejor reconocimiento de voz
     timeout: 8,
   });
 }
@@ -52,10 +51,10 @@ router.post("/llamada/entrante", (req, res) => {
   const twilio = getTwilio();
   const twiml = new twilio.twiml.VoiceResponse();
   const gather = crearGather(twiml);
-  gather.say({ language:"es-MX", voice:"Polly.Mia-Neural" },
+  gather.say({ language:"es-MX", voice:"Polly.Mia" },
     ssml("Bienvenido a Mr. Sushi. Puedo ayudarte con pedidos, reservaciones o información. ¿En qué te puedo ayudar?")
   );
-  twiml.say({ language:"es-MX", voice:"Polly.Mia-Neural" }, ssml("No escuché nada. Hasta luego."));
+  twiml.say({ language:"es-MX", voice:"Polly.Mia" }, ssml("No escuché nada. Hasta luego."));
   twiml.hangup();
   responder(res, twiml);
 });
@@ -69,7 +68,7 @@ router.post("/llamada/respuesta", async (req, res) => {
 
   if (!textoCliente.trim()) {
     const g = crearGather(twiml);
-    g.say({ language:"es-MX", voice:"Polly.Mia-Neural" }, ssml("No te escuché. ¿Me puedes repetir?"));
+    g.say({ language:"es-MX", voice:"Polly.Mia" }, ssml("No te escuché. ¿Me puedes repetir?"));
     return responder(res, twiml);
   }
 
@@ -90,7 +89,7 @@ router.post("/llamada/respuesta", async (req, res) => {
         direccion: textoCliente,
       });
       const g = crearGather(twiml);
-      g.say({ language:"es-MX", voice:"Polly.Mia-Neural" },
+      g.say({ language:"es-MX", voice:"Polly.Mia" },
         ssml(`La sucursal más cercana es ${zona}. ¿Confirmamos el envío desde ahí?`)
       );
       return responder(res, twiml);
@@ -122,10 +121,10 @@ router.post("/llamada/respuesta", async (req, res) => {
         const total = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
         const itemsTexto = items.map(i => `${i.cantidad || 1} ${i.nombre}`).join(", ");
         const g = crearGather(twiml);
-        g.say({ language:"es-MX", voice:"Polly.Mia-Neural" },
+        g.say({ language:"es-MX", voice:"Polly.Mia" },
           ssml(`Perfecto. Tu pedido ha sido registrado. ${itemsTexto}. Total ${total} pesos. Llegará desde ${estado.sucursal_sugerida} en aproximadamente 40 minutos. ¿Hay algo más en que te pueda ayudar?`)
         );
-        twiml.say({ language:"es-MX", voice:"Polly.Mia-Neural" }, ssml("Gracias por llamar a Mr. Sushi. Hasta pronto."));
+        twiml.say({ language:"es-MX", voice:"Polly.Mia" }, ssml("Gracias por llamar a Mr. Sushi. Hasta pronto."));
         twiml.hangup();
         return responder(res, twiml);
       }
@@ -170,17 +169,17 @@ router.post("/llamada/respuesta", async (req, res) => {
 
     const textoVoz = limpiar(resultado.texto);
     const g = crearGather(twiml);
-    g.say({ language:"es-MX", voice:"Polly.Mia-Neural" },
+    g.say({ language:"es-MX", voice:"Polly.Mia" },
       `<speak><prosody rate="medium" pitch="0%">${textoVoz}</prosody></speak>`
     );
-    twiml.say({ language:"es-MX", voice:"Polly.Mia-Neural" }, ssml("Gracias por llamar a Mr. Sushi. Hasta pronto."));
+    twiml.say({ language:"es-MX", voice:"Polly.Mia" }, ssml("Gracias por llamar a Mr. Sushi. Hasta pronto."));
     twiml.hangup();
     responder(res, twiml);
 
   } catch (error) {
     logger.error("Error llamada: " + error.message);
     const twimlErr = new getTwilio().twiml.VoiceResponse();
-    twimlErr.say({ language:"es-MX", voice:"Polly.Mia-Neural" },
+    twimlErr.say({ language:"es-MX", voice:"Polly.Mia" },
       ssml("Tuvimos un problema. Por favor llama de nuevo en un momento.")
     );
     twimlErr.hangup();
