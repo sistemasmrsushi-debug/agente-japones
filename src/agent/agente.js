@@ -173,17 +173,6 @@ async function procesarMensaje(historial, mensajeNuevo) {
       .replace(/\[ESCALAR\][\s\S]*?\[\/ESCALAR\]/gi, "")
       .trim();
 
-    // Si el agente habla de un platillo pero no menciona precio, inyectarlo
-    if (!accion && textoLimpio && !textoLimpio.includes("$")) {
-      const platilloMencionado = buscarPlatillo(mensajeNuevo);
-      if (platilloMencionado) {
-        textoLimpio = textoLimpio.replace(
-          platilloMencionado.nombre,
-          `${platilloMencionado.nombre} ($${platilloMencionado.precio})`
-        );
-      }
-    }
-
     if (!textoLimpio || textoLimpio.length < 3) {
       textoLimpio = "¿Podrías confirmarme tu pedido? Quiero asegurarme de registrarlo correctamente.";
     }
