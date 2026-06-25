@@ -266,12 +266,13 @@ router.post("/webhook", async (req, res) => {
     await enviarMensaje(telefono, resultado.texto);
 
     // Si el cliente pidio ver el menu, mandar PDF
-    const msgBajo = mensaje.toLowerCase();
-    const pideMenu = /\b(menu|carta|platillos|que tienen|que ofrecen|ver menu|mostrar menu)\b/.test(msgBajo);
+    const msgNorm = mensaje.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const pideMenu = /\b(menu|carta|platillos|que tienen|que ofrecen|ver menu|mostrar menu)\b/.test(msgNorm);
+    logger.info(`pideMenu: ${pideMenu} | msgNorm: "${msgNorm}"`);
     if (pideMenu) {
       setTimeout(async () => {
         await enviarMenuPDF(telefono);
-      }, 1000);
+      }, 1500);
     }
 
   } catch (error) {
@@ -335,6 +336,7 @@ async function enviarMenuPDF(telefono) {
   try {
     const client = getTwilioClient();
     const menuUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/public/menu_mrsushi.pdf`;
+    logger.info(`Enviando PDF a ${telefono}: ${menuUrl}`);
     await client.messages.create({
       from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
       to: telefono,
