@@ -265,6 +265,15 @@ router.post("/webhook", async (req, res) => {
 
     await enviarMensaje(telefono, resultado.texto);
 
+    // Si el cliente pidio ver el menu, mandar PDF
+    const msgBajo = mensaje.toLowerCase();
+    const pideMenu = /\b(menu|carta|platillos|que tienen|que ofrecen|ver menu|mostrar menu)\b/.test(msgBajo);
+    if (pideMenu) {
+      setTimeout(async () => {
+        await enviarMenuPDF(telefono);
+      }, 1000);
+    }
+
   } catch (error) {
     logger.error("Error webhook: " + error.message);
   }
@@ -319,6 +328,24 @@ async function ejecutarAccion(accion, datos, telefono) {
     }
   } catch (error) {
     logger.error(`Error accion: ` + error.message);
+  }
+}
+
+async function enviarMenuPDF(telefono) {
+  try {
+    const client = getTwilioClient();
+    const menuUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/public/menu_mrsushi.pdf`;
+    await client.messages.create({
+      from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
+      to: telefono,
+      body: "Aqui esta nuestro menu completo:",
+      mediaUrl: [menuUrl],
+    });
+    logger.info(`Menu PDF enviado a ${telefono}`);
+  } catch(error) {
+    logger.error(`Error enviando PDF: ` + error.message);
+    // Fallback: mandar link al sitio web
+    await enviarMensaje(telefono, "Puedes ver nuestro menu completo con fotos en: https://www.mrsushi.mx/pedir");
   }
 }
 

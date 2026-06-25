@@ -1,16 +1,20 @@
 // src/index.js
 require("dotenv").config();
 const express = require("express");
+const path = require("path");
 const app = express();
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Servir archivos publicos (menu PDF, etc)
+app.use("/public", express.static(path.join(__dirname, "../public")));
+
 const logger = require("./utils/logger");
-const { initDB } = require("./db/database");
 const whatsappRouter = require("./webhook/whatsapp");
 const llamadasRouter = require("./llamadas/llamadas");
 const dashboardRouter = require("./dashboard/dashboard");
+const { initDB } = require("./db/database");
 
 app.use("/", whatsappRouter);
 app.use("/", llamadasRouter);
@@ -24,13 +28,13 @@ const PORT = process.env.PORT || 8080;
 
 async function iniciar() {
   try {
-    // Inicializar base de datos antes de arrancar el servidor
     await initDB();
-
     app.listen(PORT, () => {
       logger.info(`Agente Mr. Sushi iniciado en puerto ${PORT}`);
       logger.info(`WhatsApp webhook:  http://localhost:${PORT}/webhook`);
+      logger.info(`Llamadas entrante: http://localhost:${PORT}/llamada/entrante`);
       logger.info(`Dashboard:         http://localhost:${PORT}/dashboard`);
+      logger.info(`Menu PDF:          http://localhost:${PORT}/public/menu_mrsushi.pdf`);
 
       const URL_PROPIA = process.env.RAILWAY_PUBLIC_DOMAIN
         ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/health`
@@ -47,8 +51,8 @@ async function iniciar() {
 
       logger.info(`Keep-alive activo -> ping cada 5 min a ${URL_PROPIA}`);
     });
-  } catch (err) {
-    logger.error("Error iniciando servidor: " + err.message);
+  } catch(err) {
+    logger.error("Error iniciando: " + err.message);
     process.exit(1);
   }
 }
