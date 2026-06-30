@@ -283,7 +283,17 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       }
     }
 
-    // ── CASO 4: Flujo normal con Groq ─────────────────────────────────────
+    // ── CASO 4: Detectar si pide menu -> mandar PDF directo sin pasar por GPT ─
+    const msgNorm = mensaje.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const pideMenu = /\b(menu|carta|platillos|que tienen|que ofrecen|ver menu|mostrar menu)\b/.test(msgNorm);
+    if (pideMenu) {
+      logger.info(`Cliente pidio menu -> enviando PDF directo`);
+      await enviarMensaje(telefono, "Claro! Aqui tienes nuestro menu completo:");
+      await enviarMenuPDF(telefono);
+      return;
+    }
+
+    // ── CASO 5: Flujo normal con Groq ─────────────────────────────────────
     const historial = await db.obtenerHistorial(telefono);
     const resultado = await procesarMensaje(historial, mensaje);
     await db.guardarHistorial(telefono, resultado.historialActualizado);
@@ -323,16 +333,6 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
     }
 
     await enviarMensaje(telefono, resultado.texto);
-
-    // Si el cliente pidio ver el menu, mandar PDF
-    const msgNorm = mensaje.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const pideMenu = /\b(menu|carta|platillos|que tienen|que ofrecen|ver menu|mostrar menu)\b/.test(msgNorm);
-    logger.info(`pideMenu: ${pideMenu} | msgNorm: "${msgNorm}"`);
-    if (pideMenu) {
-      setTimeout(async () => {
-        await enviarMenuPDF(telefono);
-      }, 1500);
-    }
 
   } catch (error) {
     logger.error("Error webhook: " + error.message);
