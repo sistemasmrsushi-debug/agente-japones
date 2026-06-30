@@ -2,6 +2,7 @@
 require("dotenv").config();
 const express = require("express");
 const path = require("path");
+const rateLimit = require("express-rate-limit");
 const app = express();
 
 app.use(express.json());
@@ -15,6 +16,48 @@ const whatsappRouter = require("./webhook/whatsapp");
 const llamadasRouter = require("./llamadas/llamadas");
 const dashboardRouter = require("./dashboard/dashboard");
 const { initDB } = require("./db/database");
+
+// ── RATE LIMITING ─────────────────────────────────────────────────────────────
+// Limita peticiones por IP para evitar spam/ataques al webhook
+
+// Webhook de WhatsApp y llamadas: maximo 30 peticiones por minuto por IP
+const limiterWebhook = rateLimit({
+  windowMs: 60 * 1000, // 1 minuto
+  max: 30,
+  message: { error: "Demasiadas solicitudes, intenta de nuevo en un momento." },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    logger.warn(`Rate limit excedido: ${req.ip} en ${req.path}`);
+    res.status(429).json({ error: "Demasiadas solicitudes" });
+  },
+});
+
+// Dashboard login: maximo 10 intentos por minuto (evita fuerza bruta)
+const limiterLogin = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { error: "Demasiados intentos de login, espera un momento." },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    logger.warn(`Rate limit login excedido: ${req.ip}`);
+    res.status(429).json({ error: "Demasiados intentos" });
+  },
+});
+
+// API general del dashboard: maximo 100 peticiones por minuto
+const limiterAPI = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use("/webhook", limiterWebhook);
+app.use("/llamada", limiterWebhook);
+app.use("/api/login", limiterLogin);
+app.use("/api/", limiterAPI);
 
 app.use("/", whatsappRouter);
 app.use("/", llamadasRouter);
@@ -35,6 +78,7 @@ async function iniciar() {
       logger.info(`Llamadas entrante: http://localhost:${PORT}/llamada/entrante`);
       logger.info(`Dashboard:         http://localhost:${PORT}/dashboard`);
       logger.info(`Menu PDF:          http://localhost:${PORT}/public/menu_mrsushi.pdf`);
+      logger.info(`Rate limiting:     activo (webhook: 30/min, login: 10/min, api: 100/min)`);
 
       const URL_PROPIA = process.env.RAILWAY_PUBLIC_DOMAIN
         ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/health`
