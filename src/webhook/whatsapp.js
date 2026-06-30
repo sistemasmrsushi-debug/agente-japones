@@ -6,6 +6,7 @@ const { procesarMensaje, detectarSucursalPorZona, buscarPlatillo } = require("..
 const logger = require("../utils/logger");
 const db = require("../db/database");
 const { validarDireccion } = require("../utils/geocoding");
+const { generarLinkPago } = require("../utils/netpay");
 
 function getTwilioClient() {
   return require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -141,7 +142,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       const pedido = {
         id: `PED-${Date.now()}`,
         fecha: new Date().toISOString(),
-        estado: "pendiente",
+        estado: "pendiente_pago",
         telefono_cliente: telefono,
         sucursal: estado.sucursal_sugerida,
         items,
@@ -157,20 +158,50 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       };
       await db.guardarPedido(pedido);
       await db.eliminarEstadoPedido(telefono);
-      // Limpiar historial para evitar que mensajes de cortesia post-pedido generen respuestas raras
       await db.guardarHistorial(telefono, []);
-      logger.info(`Pedido registrado: ${pedido.id} -> ${pedido.sucursal}`);
+      logger.info(`Pedido pre-registrado (pendiente de pago): ${pedido.id} -> ${pedido.sucursal}`);
 
       const total = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
       const itemsTexto = items.map(i => `${i.cantidad || 1}x ${i.nombre} ($${i.precio})`).join("\n");
-      await enviarMensaje(telefono,
-        `Pedido registrado exitosamente!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\nTotal: $${total}\nSucursal: ${estado.sucursal_sugerida}\nDireccion: ${estado.direccion}\n\nTiempo: ~40 min. Envio GRATIS!`
-      );
-      setTimeout(async () => {
+
+      // Generar link de pago con Netpay
+      const resultadoPago = await generarLinkPago({
+        monto: total,
+        referencia: pedido.id,
+        telefono: telefono,
+      });
+
+      if (resultadoPago.exito) {
         await enviarMensaje(telefono,
-          "Opcional: puedes compartir tu ubicacion GPS para que lleguen exactamente a tu puerta. Toca el clip -> Ubicacion -> Enviar mi ubicacion actual."
+          `Tu pedido esta listo para confirmar!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\nTotal: $${total}\nSucursal: ${estado.sucursal_sugerida}\nDireccion: ${estado.direccion}\n\nPara confirmar tu pedido realiza tu pago aqui:\n${resultadoPago.linkPago}\n\nTienes 15 minutos para completar el pago.`
         );
-      }, 3000);
+        // Recordatorio a los 10 minutos si sigue sin pagar
+        setTimeout(async () => {
+          const pedidoActual = (await db.obtenerPedidos(null, "gerente")).find(p => p.id === pedido.id);
+          if (pedidoActual && pedidoActual.estado === "pendiente_pago") {
+            await enviarMensaje(telefono,
+              `Recordatorio: tu pedido ${pedido.id} sigue esperando confirmacion de pago. Tienes 5 minutos mas antes de que se cancele.\n\n${resultadoPago.linkPago}`
+            );
+          }
+        }, 10 * 60 * 1000);
+        // Cancelar automaticamente a los 15 minutos si no ha pagado
+        setTimeout(async () => {
+          const pedidoActual = (await db.obtenerPedidos(null, "gerente")).find(p => p.id === pedido.id);
+          if (pedidoActual && pedidoActual.estado === "pendiente_pago") {
+            await db.actualizarEstadoPedido(pedido.id, "cancelado");
+            await enviarMensaje(telefono,
+              `Tu pedido ${pedido.id} fue cancelado por falta de pago. Si quieres intentar de nuevo, escribenos!`
+            );
+            logger.info(`Pedido ${pedido.id} cancelado automaticamente por falta de pago`);
+          }
+        }, 15 * 60 * 1000);
+      } else {
+        // Si falla la generacion del link, avisar y dejar pedido pendiente para revision manual
+        await enviarMensaje(telefono,
+          `Tu pedido fue registrado (ID: ${pedido.id}) pero tuvimos un problema generando el link de pago. Te contactaremos en breve para confirmar el pago.`
+        );
+        logger.error(`Fallo generacion de link de pago para ${pedido.id}: ${resultadoPago.error}`);
+      }
       return;
     }
 
