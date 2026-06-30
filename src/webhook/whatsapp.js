@@ -1,6 +1,7 @@
 // src/webhook/whatsapp.js
 const express = require("express");
 const router = express.Router();
+const twilioLib = require("twilio");
 const { procesarMensaje, detectarSucursalPorZona, buscarPlatillo } = require("../agent/agente");
 const logger = require("../utils/logger");
 const db = require("../db/database");
@@ -8,6 +9,33 @@ const { validarDireccion } = require("../utils/geocoding");
 
 function getTwilioClient() {
   return require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+}
+
+// ── VALIDACION DE FIRMA TWILIO ────────────────────────────────────────────────
+// Verifica que la peticion realmente viene de Twilio y no es falsificada
+function validarFirmaTwilio(req, res, next) {
+  // En desarrollo local sin HTTPS publico, permitir saltar validacion
+  if (process.env.SKIP_TWILIO_VALIDATION === "true") {
+    return next();
+  }
+
+  const firmaTwilio = req.headers["x-twilio-signature"];
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const url = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}${req.originalUrl}`;
+
+  if (!firmaTwilio) {
+    logger.warn(`Webhook sin firma Twilio - posible peticion falsa. IP: ${req.ip}`);
+    return res.status(403).send("Forbidden");
+  }
+
+  const esValida = twilioLib.validateRequest(authToken, firmaTwilio, url, req.body);
+
+  if (!esValida) {
+    logger.warn(`Firma Twilio invalida - peticion rechazada. IP: ${req.ip}`);
+    return res.status(403).send("Forbidden");
+  }
+
+  next();
 }
 
 // ── Detecta confirmacion simple ───────────────────────────────────────────────
@@ -58,7 +86,7 @@ function extraerItemsConPreciosReales(historial) {
   return items;
 }
 
-router.post("/webhook", async (req, res) => {
+router.post("/webhook", validarFirmaTwilio, async (req, res) => {
   res.set("Content-Type", "text/xml").send("<Response></Response>");
   try {
     const telefono = req.body.From;
