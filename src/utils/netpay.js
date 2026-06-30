@@ -5,20 +5,23 @@
 const https = require("https");
 const logger = require("./logger");
 
-const BASE_URL_SANDBOX = "ecommerce.netpay.com.mx";
-const BASE_URL_PROD = "suite.netpay.com.mx";
+// Hostname correcto segun documentacion de Netpay (sandbox)
+const HOSTNAME_SANDBOX = "gateway-154.netpaydev.com";
+const HOSTNAME_PROD = "suite.netpay.com.mx";
 
-function getBaseUrl() {
-  return process.env.NETPAY_ENV === "production" ? BASE_URL_PROD : BASE_URL_SANDBOX;
+function getHostname() {
+  return process.env.NETPAY_ENV === "production" ? HOSTNAME_PROD : HOSTNAME_SANDBOX;
 }
 
 // ── GENERAR LINK DE PAGO ──────────────────────────────────────────────────────
-// monto: numero en pesos (ej. 423)
-// referencia: ID unico del pedido (ej. "PED-1782174362803")
-// secretKey: opcional, si se quiere usar una llave distinta a la default (por sucursal)
 async function generarLinkPago({ monto, referencia, telefono, secretKey }) {
   return new Promise((resolve, reject) => {
     const key = secretKey || process.env.NETPAY_SECRET_KEY;
+
+    if (!key) {
+      logger.error("NETPAY_SECRET_KEY no esta configurada");
+      return resolve({ exito: false, error: "Falta configurar NETPAY_SECRET_KEY" });
+    }
 
     const body = JSON.stringify({
       successUrl: `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/pago/exitoso`,
@@ -30,10 +33,13 @@ async function generarLinkPago({ monto, referencia, telefono, secretKey }) {
       amount: monto,
     });
 
+    logger.info(`Generando link de pago Netpay -> hostname: ${getHostname()}, referencia: ${referencia}, monto: ${monto}`);
+
     const options = {
-      hostname: getBaseUrl(),
+      hostname: getHostname(),
       path: "/gateway-ecommerce/v3.2/checkout/session/",
       method: "POST",
+      timeout: 10000, // 10 segundos maximo
       headers: {
         "Content-Type": "application/json",
         "Authorization": key,
@@ -45,6 +51,7 @@ async function generarLinkPago({ monto, referencia, telefono, secretKey }) {
       let data = "";
       res.on("data", chunk => data += chunk);
       res.on("end", () => {
+        logger.info(`Respuesta Netpay checkout/session -> status: ${res.statusCode}, body: ${data.substring(0, 300)}`);
         try {
           const json = JSON.parse(data);
           if (res.statusCode === 200 && json.shortUrl) {
@@ -57,18 +64,24 @@ async function generarLinkPago({ monto, referencia, telefono, secretKey }) {
             });
           } else {
             logger.error(`Netpay rechazo la solicitud de link: ${data}`);
-            resolve({ exito: false, error: json.message || "Error generando link de pago", raw: json });
+            resolve({ exito: false, error: json.message || `Error ${res.statusCode}`, raw: json });
           }
         } catch(e) {
-          logger.error("Error parseando respuesta Netpay: " + e.message);
-          reject(e);
+          logger.error("Error parseando respuesta Netpay: " + e.message + " | raw: " + data.substring(0, 300));
+          resolve({ exito: false, error: "Respuesta invalida de Netpay" });
         }
       });
     });
 
+    req.on("timeout", () => {
+      logger.error("Timeout conectando con Netpay (10s)");
+      req.destroy();
+      resolve({ exito: false, error: "Timeout conectando con Netpay" });
+    });
+
     req.on("error", (e) => {
       logger.error("Error conectando con Netpay: " + e.message);
-      reject(e);
+      resolve({ exito: false, error: e.message });
     });
 
     req.write(body);
