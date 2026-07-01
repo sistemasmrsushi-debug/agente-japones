@@ -8,6 +8,9 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Necesario para Railway - confiar en el proxy para rate limiting correcto
+app.set("trust proxy", 1);
+
 // Servir archivos publicos (menu PDF, etc)
 app.use("/public", express.static(path.join(__dirname, "../public")));
 
