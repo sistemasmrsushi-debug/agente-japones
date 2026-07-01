@@ -93,6 +93,16 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
     const telefono = req.body.From;
     if (!telefono) return;
 
+    // ── Ignorar mensajes que no son de WhatsApp (ej: SMS de verificacion de Meta) ──
+    // El mismo webhook recibe tanto WhatsApp como SMS del numero nuevo. Sin este
+    // filtro, un SMS (From sin prefijo "whatsapp:") se procesaba como si fuera un
+    // cliente, y al intentar responder por WhatsApp fallaba con error 21910
+    // (mezcla de canales: SMS entrante / WhatsApp saliente).
+    if (!telefono.startsWith("whatsapp:")) {
+      logger.info(`Mensaje ignorado (no es WhatsApp, probablemente SMS): ${telefono}`);
+      return;
+    }
+
     // ── GPS ───────────────────────────────────────────────────────────────
     if (req.body.Latitude && req.body.Longitude) {
       const { Latitude: lat, Longitude: lng } = req.body;
