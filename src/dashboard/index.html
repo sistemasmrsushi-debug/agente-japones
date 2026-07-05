@@ -376,7 +376,7 @@ function filaP(p) {
     : '';
   return `<tr class="${urgente?'fila-urgente':''}">
     <td><div style="font-size:0.6rem;color:var(--muted)">${p.id}</div><div style="font-size:0.65rem;color:${urgente?'var(--rojo)':'var(--muted)'}">${fechaCorta} · ${hora}${urgente?' ⚠ 5+ min':''}</div></td>
-    <td>${telLink}</td>
+    <td>${p.nombre_cliente ? `<div style="font-weight:600">${p.nombre_cliente}</div>` : ''}${telLink}</td>
     <td>${items}${direccionHtml}${gpsHtml}</td>
     <td>${p.sucursal||'—'}</td>
     <td style="font-size:0.7rem">${tipo}</td>

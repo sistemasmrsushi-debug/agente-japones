@@ -363,6 +363,7 @@ async function ejecutarAccion(accion, datos, telefono) {
         fecha: new Date().toISOString(),
         estado: "pendiente",
         telefono_cliente: telefono,
+        nombre_cliente: datos.pedido?.nombre_cliente || null,
         sucursal: datos.pedido?.sucursal || "Por confirmar",
         items,
         tipo: datos.pedido?.tipo || "sucursal",

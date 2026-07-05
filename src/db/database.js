@@ -19,6 +19,7 @@ async function initDB() {
         fecha TIMESTAMPTZ NOT NULL,
         estado TEXT NOT NULL DEFAULT 'pendiente',
         telefono_cliente TEXT,
+        nombre_cliente TEXT,
         sucursal TEXT,
         items JSONB,
         tipo TEXT DEFAULT 'sucursal',
@@ -29,6 +30,10 @@ async function initDB() {
         actualizado TIMESTAMPTZ
       );
     `);
+    // La tabla "pedidos" ya existia en produccion antes de agregar nombre_cliente.
+    // CREATE TABLE IF NOT EXISTS no modifica tablas ya creadas, por eso este ALTER
+    // explicito es necesario para que la columna aparezca en la base de datos real.
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS nombre_cliente TEXT;`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS reservaciones (
         id TEXT PRIMARY KEY,
@@ -100,16 +105,17 @@ async function initDB() {
 
 async function guardarPedido(pedido) {
   await pool.query(`
-    INSERT INTO pedidos (id, fecha, estado, telefono_cliente, sucursal, items, tipo, direccion, colonia, referencias, ubicacion_gps)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    INSERT INTO pedidos (id, fecha, estado, telefono_cliente, nombre_cliente, sucursal, items, tipo, direccion, colonia, referencias, ubicacion_gps)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
     ON CONFLICT (id) DO UPDATE SET
       estado = EXCLUDED.estado,
+      nombre_cliente = COALESCE(EXCLUDED.nombre_cliente, pedidos.nombre_cliente),
       sucursal = EXCLUDED.sucursal,
       items = EXCLUDED.items,
       ubicacion_gps = EXCLUDED.ubicacion_gps,
       actualizado = NOW()
   `, [
-    pedido.id, pedido.fecha, pedido.estado, pedido.telefono_cliente,
+    pedido.id, pedido.fecha, pedido.estado, pedido.telefono_cliente, pedido.nombre_cliente || null,
     pedido.sucursal, JSON.stringify(pedido.items), pedido.tipo,
     pedido.direccion, pedido.colonia, pedido.referencias,
     pedido.ubicacion_gps ? JSON.stringify(pedido.ubicacion_gps) : null
