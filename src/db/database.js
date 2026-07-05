@@ -50,6 +50,43 @@ async function initDB() {
         actualizado TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
+    // ── Panel de administracion: sucursales, menu y usuarios editables ──
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS sucursales (
+        id INTEGER PRIMARY KEY,
+        nombre TEXT NOT NULL,
+        tipo TEXT NOT NULL,
+        zona TEXT,
+        direccion TEXT,
+        telefono TEXT,
+        telefono_transferencia TEXT,
+        whatsapp TEXT,
+        horario_apertura TEXT,
+        horario_cierre TEXT,
+        actualizado TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS menu_items (
+        id SERIAL PRIMARY KEY,
+        categoria TEXT NOT NULL,
+        nombre TEXT NOT NULL,
+        precio NUMERIC(10,2) NOT NULL,
+        descripcion TEXT,
+        orden INTEGER DEFAULT 0,
+        activo BOOLEAN DEFAULT TRUE,
+        actualizado TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS dashboard_usuarios (
+        usuario TEXT PRIMARY KEY,
+        password TEXT NOT NULL,
+        sucursal TEXT,
+        rol TEXT NOT NULL DEFAULT 'sucursal',
+        actualizado TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
     logger.info("Base de datos inicializada correctamente");
   } catch (err) {
     logger.error("Error inicializando DB: " + err.message);
@@ -203,6 +240,154 @@ async function eliminarEstadoPedido(telefono) {
   await pool.query("DELETE FROM conversaciones WHERE telefono=$1", [key]);
 }
 
+// ── SUCURSALES (editable desde el panel) ─────────────────────────────────────
+
+async function obtenerSucursales() {
+  const { rows } = await pool.query("SELECT * FROM sucursales ORDER BY nombre");
+  return rows;
+}
+
+async function actualizarSucursal(id, campos) {
+  const permitidos = ["direccion", "telefono", "telefono_transferencia", "whatsapp", "horario_apertura", "horario_cierre"];
+  const sets = [];
+  const values = [];
+  let i = 1;
+  for (const campo of permitidos) {
+    if (campos[campo] !== undefined) {
+      sets.push(`${campo} = $${i}`);
+      values.push(campos[campo]);
+      i++;
+    }
+  }
+  if (sets.length === 0) return null;
+  values.push(id);
+  const { rows } = await pool.query(
+    `UPDATE sucursales SET ${sets.join(", ")}, actualizado = NOW() WHERE id = $${i} RETURNING *`,
+    values
+  );
+  return rows[0] || null;
+}
+
+async function insertarSucursalSiNoExiste(s) {
+  await pool.query(`
+    INSERT INTO sucursales (id, nombre, tipo, zona, direccion, telefono, telefono_transferencia, whatsapp, horario_apertura, horario_cierre)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+    ON CONFLICT (id) DO NOTHING
+  `, [s.id, s.nombre, s.tipo, s.zona, s.direccion, s.telefono, s.telefono_transferencia, s.whatsapp, s.horario_apertura || null, s.horario_cierre || null]);
+}
+
+// ── MENU (editable desde el panel) ───────────────────────────────────────────
+
+async function obtenerMenu() {
+  const { rows } = await pool.query("SELECT * FROM menu_items WHERE activo = TRUE ORDER BY categoria, orden, nombre");
+  return rows;
+}
+
+async function crearItemMenu({ categoria, nombre, precio, descripcion, orden }) {
+  const { rows } = await pool.query(`
+    INSERT INTO menu_items (categoria, nombre, precio, descripcion, orden)
+    VALUES ($1,$2,$3,$4,$5) RETURNING *
+  `, [categoria, nombre, precio, descripcion || "", orden || 0]);
+  return rows[0];
+}
+
+async function actualizarItemMenu(id, campos) {
+  const permitidos = ["categoria", "nombre", "precio", "descripcion", "orden", "activo"];
+  const sets = [];
+  const values = [];
+  let i = 1;
+  for (const campo of permitidos) {
+    if (campos[campo] !== undefined) {
+      sets.push(`${campo} = $${i}`);
+      values.push(campos[campo]);
+      i++;
+    }
+  }
+  if (sets.length === 0) return null;
+  values.push(id);
+  const { rows } = await pool.query(
+    `UPDATE menu_items SET ${sets.join(", ")}, actualizado = NOW() WHERE id = $${i} RETURNING *`,
+    values
+  );
+  return rows[0] || null;
+}
+
+async function eliminarItemMenu(id) {
+  await pool.query("UPDATE menu_items SET activo = FALSE WHERE id = $1", [id]);
+}
+
+// ── USUARIOS DEL DASHBOARD (editable desde el panel, solo gerente) ──────────
+
+async function obtenerUsuariosDashboard() {
+  const { rows } = await pool.query(
+    "SELECT usuario, sucursal, rol, actualizado FROM dashboard_usuarios ORDER BY rol DESC, usuario"
+  );
+  return rows; // nunca se devuelve la columna password
+}
+
+async function obtenerUsuarioDashboardPorUsuario(usuario) {
+  const { rows } = await pool.query(
+    "SELECT * FROM dashboard_usuarios WHERE usuario = $1",
+    [usuario.toLowerCase()]
+  );
+  return rows[0] || null;
+}
+
+async function crearUsuarioDashboard({ usuario, password, sucursal, rol }) {
+  const { rows } = await pool.query(`
+    INSERT INTO dashboard_usuarios (usuario, password, sucursal, rol)
+    VALUES ($1,$2,$3,$4) RETURNING usuario, sucursal, rol, actualizado
+  `, [usuario.toLowerCase(), password, sucursal || null, rol || "sucursal"]);
+  return rows[0];
+}
+
+async function actualizarPasswordUsuarioDashboard(usuario, password) {
+  const { rows } = await pool.query(
+    "UPDATE dashboard_usuarios SET password = $1, actualizado = NOW() WHERE usuario = $2 RETURNING usuario, sucursal, rol, actualizado",
+    [password, usuario.toLowerCase()]
+  );
+  return rows[0] || null;
+}
+
+async function eliminarUsuarioDashboard(usuario) {
+  await pool.query("DELETE FROM dashboard_usuarios WHERE usuario = $1", [usuario.toLowerCase()]);
+}
+
+async function insertarUsuarioDashboardSiNoExiste(u) {
+  await pool.query(`
+    INSERT INTO dashboard_usuarios (usuario, password, sucursal, rol)
+    VALUES ($1,$2,$3,$4)
+    ON CONFLICT (usuario) DO NOTHING
+  `, [u.usuario.toLowerCase(), u.password, u.sucursal || null, u.rol || "sucursal"]);
+}
+
+// ── ENSAMBLADOR: config completa (para uso futuro del agente de IA) ────────
+
+async function obtenerConfiguracionRestaurante(estaticos) {
+  const sucursales = await obtenerSucursales();
+  const menuRows = await obtenerMenu();
+  const menu = {};
+  for (const item of menuRows) {
+    if (!menu[item.categoria]) menu[item.categoria] = [];
+    menu[item.categoria].push({
+      nombre: item.nombre,
+      precio: Number(item.precio),
+      descripcion: item.descripcion,
+    });
+  }
+  return {
+    ...estaticos, // nombre, telefono_principal, horario_general, zonas_domicilio, promociones_generales, politicas
+    sucursales: sucursales.map(s => ({
+      id: s.id, nombre: s.nombre, tipo: s.tipo, zona: s.zona,
+      direccion: s.direccion, telefono: s.telefono,
+      telefono_transferencia: s.telefono_transferencia, whatsapp: s.whatsapp,
+      horario_propio: s.horario_apertura ? { abre: s.horario_apertura, cierra: s.horario_cierre } : null,
+      promociones_propias: [],
+    })),
+    menu,
+  };
+}
+
 module.exports = {
   initDB,
   guardarEstadoPedido,
@@ -218,4 +403,19 @@ module.exports = {
   actualizarEstadoReservacion,
   obtenerHistorial,
   guardarHistorial,
+  // Panel de administracion
+  obtenerSucursales,
+  actualizarSucursal,
+  insertarSucursalSiNoExiste,
+  obtenerMenu,
+  crearItemMenu,
+  actualizarItemMenu,
+  eliminarItemMenu,
+  obtenerUsuariosDashboard,
+  obtenerUsuarioDashboardPorUsuario,
+  crearUsuarioDashboard,
+  actualizarPasswordUsuarioDashboard,
+  eliminarUsuarioDashboard,
+  insertarUsuarioDashboardSiNoExiste,
+  obtenerConfiguracionRestaurante,
 };
