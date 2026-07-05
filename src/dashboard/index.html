@@ -75,6 +75,7 @@ tr:hover td{background:var(--gris1)}
 .btn-accion.rojo:hover{background:var(--rojo);border-color:var(--rojo);color:var(--blanco)}
 .btn-accion.azul:hover{background:#1A6FA8;border-color:#1A6FA8;color:var(--blanco)}
 .vacio{text-align:center;padding:3rem;color:var(--muted);font-size:0.75rem}
+.fila-grupo td{background:var(--gris1);color:var(--turquesa);font-size:0.62rem;letter-spacing:0.14em;text-transform:uppercase;padding:0.5rem 0.9rem;font-weight:600;border-bottom:1px solid var(--borde)}
 .sucursales-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1px;background:var(--borde);margin-bottom:1.5rem}
 .sucursal-card{background:var(--carbon);padding:1.2rem 1.5rem}
 .sc-nombre{font-size:0.65rem;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);margin-bottom:0.5rem}
@@ -240,7 +241,7 @@ tr:hover td{background:var(--gris1)}
 </div>
 
 <script>
-let sesion = null, todosLosPedidos = [], filtroActual = 'todos', ultimoConteo = 0;
+let sesion = null, todosLosPedidos = [], filtroActual = 'todos';
 setInterval(() => { document.getElementById('reloj').textContent = new Date().toLocaleString('es-MX',{weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'}); }, 1000);
 document.getElementById('inp-password').addEventListener('keydown', e => { if(e.key==='Enter') login(); });
 
@@ -288,9 +289,15 @@ async function cargarPedidos() {
   try {
     const params = new URLSearchParams({sucursal: sesion.sucursal||'', rol: sesion.rol});
     const pedidos = await (await fetchAuth('/api/pedidos?'+params)).json();
-    const pendientes = pedidos.filter(p=>p.estado==='pendiente').length;
-    if (pendientes > ultimoConteo && ultimoConteo > 0) { mostrarAlerta(`🍣 Nuevo pedido en ${sesion.sucursal||'sucursal'}`); reproducirSonido(); }
-    ultimoConteo = pendientes;
+    const pendientes = pedidos.filter(p=>p.estado==='pendiente');
+    if (pendientes.length > 0) {
+      // Mientras exista AL MENOS UN pedido pendiente (nuevo o de hace rato), seguir alertando.
+      // No dejar de sonar solo porque ya se avisó una vez — hasta que se acepte el pedido.
+      mostrarAlerta(`🍣 Tienes ${pendientes.length} pedido${pendientes.length>1?'s':''} pendiente${pendientes.length>1?'s':''} en ${sesion.sucursal||'sucursal'}`);
+    } else {
+      detenerAlarma();
+      cerrarAlerta();
+    }
     todosLosPedidos = pedidos;
     renderPedidos(pedidos);
     actualizarStats(pedidos);
@@ -368,20 +375,52 @@ function filaP(p) {
   </tr>`;
 }
 
+function categoriaFecha(fechaStr) {
+  const d = new Date(fechaStr);
+  const hoy = new Date();
+  const ayer = new Date();
+  ayer.setDate(hoy.getDate() - 1);
+  if (d.toDateString() === hoy.toDateString()) return 'hoy';
+  if (d.toDateString() === ayer.toDateString()) return 'ayer';
+  return 'anteriores';
+}
+
+function agruparPorFecha(items, obtenerFecha) {
+  const grupos = { hoy: [], ayer: [], anteriores: [] };
+  items.forEach(item => grupos[categoriaFecha(obtenerFecha(item))].push(item));
+  return grupos;
+}
+
+function filaGrupo(texto, colspan) {
+  return `<tr class="fila-grupo"><td colspan="${colspan}">${texto}</td></tr>`;
+}
+
+function renderFilasAgrupadas(items, obtenerFecha, renderFila, colspan, etiquetas, vacioTexto) {
+  const grupos = agruparPorFecha(items, obtenerFecha);
+  const hayMasDeUnGrupo = grupos.ayer.length > 0 || grupos.anteriores.length > 0;
+  let html = '';
+  if (grupos.hoy.length) html += (hayMasDeUnGrupo ? filaGrupo(etiquetas.hoy, colspan) : '') + grupos.hoy.map(renderFila).join('');
+  if (grupos.ayer.length) html += filaGrupo(etiquetas.ayer, colspan) + grupos.ayer.map(renderFila).join('');
+  if (grupos.anteriores.length) html += filaGrupo(etiquetas.anteriores, colspan) + grupos.anteriores.map(renderFila).join('');
+  return html || `<tr><td colspan="${colspan}" class="vacio">${vacioTexto}</td></tr>`;
+}
+
+const ETIQUETAS_PEDIDOS = { hoy: 'Pedidos de hoy', ayer: 'Pedidos de ayer', anteriores: 'Pedidos anteriores' };
+const ETIQUETAS_RESERVACIONES = { hoy: 'Reservaciones de hoy', ayer: 'Reservaciones de ayer', anteriores: 'Reservaciones anteriores' };
+
 function renderPedidos(pedidos) {
   const filtrados = filtroActual==='todos' ? pedidos : pedidos.filter(p=>p.estado===filtroActual);
-  const tbody = document.getElementById('tbody-pedidos');
-  tbody.innerHTML = filtrados.length ? filtrados.map(filaP).join('') : '<tr><td colspan="8" class="vacio">Sin pedidos.</td></tr>';
+  document.getElementById('tbody-pedidos').innerHTML =
+    renderFilasAgrupadas(filtrados, p=>p.fecha, filaP, 8, ETIQUETAS_PEDIDOS, 'Sin pedidos.');
 }
 
 function renderTablaGerente(pedidos) {
-  const tbody = document.getElementById('tbody-gerente');
-  tbody.innerHTML = pedidos.length ? pedidos.map(filaP).join('') : '<tr><td colspan="8" class="vacio">Sin pedidos.</td></tr>';
+  document.getElementById('tbody-gerente').innerHTML =
+    renderFilasAgrupadas(pedidos, p=>p.fecha, filaP, 8, ETIQUETAS_PEDIDOS, 'Sin pedidos.');
 }
 
-function renderReservaciones(reservaciones) {
-  const tbody = document.getElementById('tbody-reservaciones');
-  tbody.innerHTML = reservaciones.length ? reservaciones.map(r=>`<tr>
+function filaR(r) {
+  return `<tr>
     <td style="font-size:0.6rem;color:var(--muted)">${r.id}</td>
     <td>${r.nombre||'—'}</td>
     <td>${(r.telefono_cliente||'—').replace('whatsapp:','')}</td>
@@ -389,8 +428,13 @@ function renderReservaciones(reservaciones) {
     <td>${r.personas||'—'}</td>
     <td>${r.sucursal||'—'}</td>
     <td><span class="badge ${r.estado}">${r.estado}</span></td>
-    <td>${sesion?.rol==='gerente'&&r.estado!=='cancelada'?`<button class="btn-accion rojo" onclick="cambiarEstado('reservacion','${r.id}','cancelada')">Cancelar</button>`:''}
-    </td></tr>`).join('') : '<tr><td colspan="8" class="vacio">Sin reservaciones.</td></tr>';
+    <td>${sesion?.rol==='gerente'&&r.estado!=='cancelada'?`<button class="btn-accion rojo" onclick="cambiarEstado('reservacion','${r.id}','cancelada')">Cancelar</button>`:''}</td>
+  </tr>`;
+}
+
+function renderReservaciones(reservaciones) {
+  document.getElementById('tbody-reservaciones').innerHTML =
+    renderFilasAgrupadas(reservaciones, r=>r.fecha_registro, filaR, 8, ETIQUETAS_RESERVACIONES, 'Sin reservaciones.');
 }
 
 async function cambiarEstado(tipo, id, estado) {
