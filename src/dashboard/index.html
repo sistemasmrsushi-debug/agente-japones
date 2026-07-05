@@ -348,7 +348,9 @@ function esUrgente(p) {
 function filaP(p) {
   const items = Array.isArray(p.items) ? p.items.map(i=>`${i.cantidad||1}× ${i.nombre}`).join(', ') : (p.items||'—');
   const total = Array.isArray(p.items) ? p.items.reduce((s,i)=>s+(i.precio||0)*(i.cantidad||1),0) : '—';
-  const hora = new Date(p.fecha).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+  const fechaObj = new Date(p.fecha);
+  const hora = fechaObj.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+  const fechaCorta = fechaObj.toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit'});
   const urgente = esUrgente(p);
   const esGerente = sesion?.rol==='gerente';
   const acciones = p.estado==='pendiente' ? `
@@ -373,7 +375,7 @@ function filaP(p) {
     ? `<div style="margin-top:0.3rem"><a href="${p.ubicacion_gps.maps_url}" target="_blank" style="color:var(--verde);font-size:0.6rem;text-decoration:none">📌 Ver en mapa</a></div>`
     : '';
   return `<tr class="${urgente?'fila-urgente':''}">
-    <td><div style="font-size:0.6rem;color:var(--muted)">${p.id}</div><div style="font-size:0.65rem;color:${urgente?'var(--rojo)':'var(--muted)'}">${hora}${urgente?' ⚠ 5+ min':''}</div></td>
+    <td><div style="font-size:0.6rem;color:var(--muted)">${p.id}</div><div style="font-size:0.65rem;color:${urgente?'var(--rojo)':'var(--muted)'}">${fechaCorta} · ${hora}${urgente?' ⚠ 5+ min':''}</div></td>
     <td>${telLink}</td>
     <td>${items}${direccionHtml}${gpsHtml}</td>
     <td>${p.sucursal||'—'}</td>
