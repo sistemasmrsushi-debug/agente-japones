@@ -83,6 +83,20 @@ tr:hover td{background:var(--gris1)}
 .sc-lbl{font-size:0.55rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted)}
 .alerta-banner{position:fixed;top:0;left:0;right:0;z-index:999;background:var(--turquesa);color:var(--blanco);padding:0.7rem 1.5rem;font-size:0.8rem;display:none;align-items:center;justify-content:space-between}
 .alerta-close{background:none;border:none;color:var(--blanco);cursor:pointer;font-size:1.2rem}
+.admin-sub{display:none}.admin-sub.active{display:block}
+.admin-form{display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;margin-bottom:0.8rem;padding:0.9rem;background:var(--carbon);border:1px solid var(--borde)}
+.admin-input{background:var(--gris1);border:1px solid var(--borde);color:var(--texto);font-family:'Inter',sans-serif;font-size:0.75rem;padding:0.5rem 0.7rem;outline:none;flex:1;min-width:140px;transition:border-color 0.2s}
+.admin-input:focus{border-color:var(--turquesa)}
+.admin-input-sm{flex:0 0 100px;min-width:100px}
+.admin-input-lg{flex:2;min-width:200px}
+.admin-input-edit{background:var(--gris1);border:1px solid var(--borde);color:var(--texto);font-family:'Inter',sans-serif;font-size:0.72rem;padding:0.4rem 0.6rem;outline:none;width:100%;transition:border-color 0.2s}
+.admin-input-edit:focus{border-color:var(--turquesa)}
+.btn-guardar{background:var(--turquesa);color:var(--blanco);border:none;padding:0.55rem 1.1rem;font-family:'Inter',sans-serif;font-size:0.65rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;transition:background 0.2s;white-space:nowrap}
+.btn-guardar:hover{background:var(--turquesa-h)}
+.admin-msg{font-size:0.7rem;margin-bottom:0.6rem;min-height:0.9rem}
+.admin-msg.ok{color:var(--verde)}
+.admin-msg.err{color:var(--rojo)}
+.celda-input{padding:0.4rem !important}
 ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:var(--negro)}::-webkit-scrollbar-thumb{background:var(--borde)}
 </style>
 </head>
@@ -125,6 +139,7 @@ tr:hover td{background:var(--gris1)}
     <button class="tab active" id="tab-pedidos" onclick="cambiarTab('pedidos')">Pedidos</button>
     <button class="tab" id="tab-reservaciones" onclick="cambiarTab('reservaciones')">Reservaciones</button>
     <button class="tab" id="tab-gerente" onclick="cambiarTab('gerente')" style="display:none">Vista Gerente</button>
+    <button class="tab" id="tab-admin" onclick="cambiarTab('admin')" style="display:none">Administración</button>
     <button class="refresh-btn" onclick="cargarDatos()">↻ Actualizar</button>
   </div>
   <div class="stats-bar">
@@ -166,6 +181,61 @@ tr:hover td{background:var(--gris1)}
         </table>
       </div>
     </div>
+    <div class="panel" id="panel-admin">
+      <div class="filtros">
+        <button class="filtro-btn active" id="subtab-menu" onclick="cambiarSubtabAdmin('menu')">Menú y precios</button>
+        <button class="filtro-btn" id="subtab-sucursales" onclick="cambiarSubtabAdmin('sucursales')">Sucursales</button>
+        <button class="filtro-btn" id="subtab-usuarios" onclick="cambiarSubtabAdmin('usuarios')">Usuarios</button>
+      </div>
+
+      <div class="admin-sub active" id="admin-menu">
+        <div class="admin-form">
+          <input class="admin-input" id="am-categoria" list="lista-categorias" placeholder="Categoría (ej. Rollos Especialidades)">
+          <datalist id="lista-categorias"></datalist>
+          <input class="admin-input" id="am-nombre" placeholder="Nombre del platillo">
+          <input class="admin-input admin-input-sm" id="am-precio" type="number" step="0.01" min="0" placeholder="Precio">
+          <input class="admin-input admin-input-lg" id="am-descripcion" placeholder="Descripción (opcional)">
+          <button class="btn-guardar" onclick="agregarItemMenu()">+ Agregar</button>
+        </div>
+        <div class="admin-msg" id="am-msg"></div>
+        <div class="tabla-wrap">
+          <table>
+            <thead><tr><th>Categoría</th><th>Nombre</th><th>Precio</th><th>Descripción</th><th>Acciones</th></tr></thead>
+            <tbody id="tbody-admin-menu"><tr><td colspan="5" class="vacio">Cargando...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="admin-sub" id="admin-sucursales">
+        <div class="admin-msg" id="as-msg"></div>
+        <div class="tabla-wrap">
+          <table>
+            <thead><tr><th>Sucursal</th><th>Dirección</th><th>Teléfono</th><th>Tel. transferencia</th><th>WhatsApp</th><th>Horario</th><th></th></tr></thead>
+            <tbody id="tbody-admin-sucursales"><tr><td colspan="7" class="vacio">Cargando...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="admin-sub" id="admin-usuarios">
+        <div class="admin-form">
+          <input class="admin-input" id="au-usuario" placeholder="usuario (minúsculas, sin espacios)">
+          <input class="admin-input" id="au-password" type="text" placeholder="Contraseña (mín. 8 caracteres)">
+          <input class="admin-input" id="au-sucursal" placeholder="Sucursal (dejar vacío si es gerente)">
+          <select class="admin-input admin-input-sm" id="au-rol">
+            <option value="sucursal">Sucursal</option>
+            <option value="gerente">Gerente</option>
+          </select>
+          <button class="btn-guardar" onclick="agregarUsuario()">+ Agregar</button>
+        </div>
+        <div class="admin-msg" id="au-msg"></div>
+        <div class="tabla-wrap">
+          <table>
+            <thead><tr><th>Usuario</th><th>Sucursal</th><th>Rol</th><th>Nueva contraseña</th><th>Acciones</th></tr></thead>
+            <tbody id="tbody-admin-usuarios"><tr><td colspan="5" class="vacio">Cargando...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -173,6 +243,18 @@ tr:hover td{background:var(--gris1)}
 let sesion = null, todosLosPedidos = [], filtroActual = 'todos', ultimoConteo = 0;
 setInterval(() => { document.getElementById('reloj').textContent = new Date().toLocaleString('es-MX',{weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'}); }, 1000);
 document.getElementById('inp-password').addEventListener('keydown', e => { if(e.key==='Enter') login(); });
+
+function fetchAuth(url, options = {}) {
+  const token = localStorage.getItem('mrsushi_token');
+  const headers = Object.assign({}, options.headers, token ? { 'Authorization': 'Bearer ' + token } : {});
+  return fetch(url, Object.assign({}, options, { headers })).then(r => {
+    if (r.status === 401) {
+      logout();
+      document.getElementById('login-error').textContent = 'Tu sesion expiro. Inicia sesion de nuevo.';
+    }
+    return r;
+  });
+}
 
 async function login() {
   const usuario = document.getElementById('inp-usuario').value.trim();
@@ -183,16 +265,18 @@ async function login() {
     const data = await r.json();
     if (!r.ok) { document.getElementById('login-error').textContent = data.error; return; }
     sesion = data;
+    localStorage.setItem('mrsushi_token', data.token);
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
     document.getElementById('header-sucursal').textContent = sesion.rol==='gerente' ? 'Gerente General' : sesion.sucursal;
     if (sesion.rol==='gerente') document.getElementById('tab-gerente').style.display='inline-block';
+    if (sesion.rol==='gerente') document.getElementById('tab-admin').style.display='inline-block';
     cargarDatos();
     setInterval(cargarDatos, 30000);
   } catch { document.getElementById('login-error').textContent = 'Error de conexión'; }
 }
 
-function logout() { sesion=null; document.getElementById('login-screen').style.display='flex'; document.getElementById('app').style.display='none'; document.getElementById('inp-password').value=''; }
+function logout() { sesion=null; localStorage.removeItem('mrsushi_token'); document.getElementById('login-screen').style.display='flex'; document.getElementById('app').style.display='none'; document.getElementById('inp-password').value=''; }
 
 async function cargarDatos() {
   if (!sesion) return;
@@ -203,7 +287,7 @@ async function cargarDatos() {
 async function cargarPedidos() {
   try {
     const params = new URLSearchParams({sucursal: sesion.sucursal||'', rol: sesion.rol});
-    const pedidos = await (await fetch('/api/pedidos?'+params)).json();
+    const pedidos = await (await fetchAuth('/api/pedidos?'+params)).json();
     const pendientes = pedidos.filter(p=>p.estado==='pendiente').length;
     if (pendientes > ultimoConteo && ultimoConteo > 0) { mostrarAlerta(`🍣 Nuevo pedido en ${sesion.sucursal||'sucursal'}`); reproducirSonido(); }
     ultimoConteo = pendientes;
@@ -216,14 +300,14 @@ async function cargarPedidos() {
 async function cargarReservaciones() {
   try {
     const params = new URLSearchParams({sucursal: sesion.sucursal||'', rol: sesion.rol});
-    const reservaciones = await (await fetch('/api/reservaciones?'+params)).json();
+    const reservaciones = await (await fetchAuth('/api/reservaciones?'+params)).json();
     renderReservaciones(reservaciones);
   } catch {}
 }
 
 async function cargarStats() {
   try {
-    const stats = await (await fetch('/api/stats')).json();
+    const stats = await (await fetchAuth('/api/stats')).json();
     document.getElementById('sucursales-grid').innerHTML = stats.map(s=>`
       <div class="sucursal-card">
         <div class="sc-nombre">${s.sucursal}</div>
@@ -311,7 +395,7 @@ function renderReservaciones(reservaciones) {
 
 async function cambiarEstado(tipo, id, estado) {
   const url = tipo==='pedido' ? `/api/pedidos/${id}/estado` : `/api/reservaciones/${id}/estado`;
-  await fetch(url, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({estado})});
+  await fetchAuth(url, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({estado})});
   cargarDatos();
 }
 
@@ -328,6 +412,7 @@ function cambiarTab(tab) {
   document.getElementById('tab-'+tab).classList.add('active');
   document.getElementById('panel-'+tab).classList.add('active');
   if(tab==='gerente') cargarStats();
+  if(tab==='admin') cambiarSubtabAdmin('menu');
 }
 
 let alarmaInterval = null;
@@ -384,7 +469,7 @@ function activarSonido() {
 async function aceptarPedido(id) {
   detenerAlarma();
   cerrarAlerta();
-  await fetch(`/api/pedidos/${id}/estado`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({estado:'en_proceso'})});
+  await fetchAuth(`/api/pedidos/${id}/estado`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({estado:'en_proceso'})});
   cargarDatos();
 }
 
@@ -395,6 +480,208 @@ function mostrarAlerta(texto) {
   // NO se cierra sola — solo se cierra al aceptar el pedido
 }
 function cerrarAlerta() { document.getElementById('alerta-banner').style.display='none'; }
+
+// ==================== PANEL DE ADMINISTRACIÓN ====================
+// Solo visible y funcional para el rol "gerente". Los endpoints /api/admin/*
+// tambien estan protegidos del lado del servidor con requireGerente, asi que
+// esto es una segunda capa (evita mostrar botones que fallarian), no la unica.
+
+let categoriasConocidas = [];
+
+function cambiarSubtabAdmin(sub) {
+  document.querySelectorAll('#panel-admin .filtro-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.admin-sub').forEach(s=>s.classList.remove('active'));
+  document.getElementById('subtab-'+sub).classList.add('active');
+  document.getElementById('admin-'+sub).classList.add('active');
+  if (sub==='menu') cargarAdminMenu();
+  if (sub==='sucursales') cargarAdminSucursales();
+  if (sub==='usuarios') cargarAdminUsuarios();
+}
+
+function mostrarMsg(elId, texto, ok) {
+  const el = document.getElementById(elId);
+  el.textContent = texto;
+  el.className = 'admin-msg ' + (ok ? 'ok' : 'err');
+  setTimeout(() => { el.textContent = ''; el.className = 'admin-msg'; }, 4000);
+}
+
+// ---------- MENÚ ----------
+
+async function cargarAdminMenu() {
+  try {
+    const items = await (await fetchAuth('/api/admin/menu')).json();
+    categoriasConocidas = [...new Set(items.map(i=>i.categoria))];
+    document.getElementById('lista-categorias').innerHTML = categoriasConocidas.map(c=>`<option value="${c}">`).join('');
+    renderAdminMenu(items);
+  } catch { mostrarMsg('am-msg', 'Error cargando el menú.', false); }
+}
+
+function renderAdminMenu(items) {
+  const tbody = document.getElementById('tbody-admin-menu');
+  tbody.innerHTML = items.length ? items.map(i => `
+    <tr data-id="${i.id}">
+      <td class="celda-input"><input class="admin-input-edit" value="${i.categoria}" data-campo="categoria"></td>
+      <td class="celda-input"><input class="admin-input-edit" value="${(i.nombre||'').replace(/"/g,'&quot;')}" data-campo="nombre"></td>
+      <td class="celda-input" style="max-width:100px"><input class="admin-input-edit" type="number" step="0.01" min="0" value="${i.precio}" data-campo="precio"></td>
+      <td class="celda-input"><input class="admin-input-edit" value="${(i.descripcion||'').replace(/"/g,'&quot;')}" data-campo="descripcion"></td>
+      <td>
+        <div class="acciones">
+          <button class="btn-accion azul" onclick="guardarItemMenu(${i.id}, this)">Guardar</button>
+          <button class="btn-accion rojo" onclick="eliminarItemMenuUI(${i.id})">Eliminar</button>
+        </div>
+      </td>
+    </tr>`).join('') : '<tr><td colspan="5" class="vacio">Sin platillos registrados.</td></tr>';
+}
+
+async function guardarItemMenu(id, btn) {
+  const fila = btn.closest('tr');
+  const campos = {};
+  fila.querySelectorAll('[data-campo]').forEach(inp => campos[inp.dataset.campo] = inp.value);
+  campos.precio = Number(campos.precio);
+  if (isNaN(campos.precio) || campos.precio < 0) return mostrarMsg('am-msg', 'El precio debe ser un número válido.', false);
+  try {
+    const r = await fetchAuth(`/api/admin/menu/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(campos) });
+    const data = await r.json();
+    if (!r.ok) return mostrarMsg('am-msg', data.error || 'Error al guardar.', false);
+    mostrarMsg('am-msg', `"${campos.nombre}" actualizado.`, true);
+    cargarAdminMenu();
+  } catch { mostrarMsg('am-msg', 'Error de conexión.', false); }
+}
+
+async function eliminarItemMenuUI(id) {
+  if (!confirm('¿Quitar este platillo del menú? El agente de IA dejará de ofrecerlo.')) return;
+  try {
+    await fetchAuth(`/api/admin/menu/${id}`, { method:'DELETE' });
+    mostrarMsg('am-msg', 'Platillo eliminado.', true);
+    cargarAdminMenu();
+  } catch { mostrarMsg('am-msg', 'Error de conexión.', false); }
+}
+
+async function agregarItemMenu() {
+  const categoria = document.getElementById('am-categoria').value.trim();
+  const nombre = document.getElementById('am-nombre').value.trim();
+  const precio = Number(document.getElementById('am-precio').value);
+  const descripcion = document.getElementById('am-descripcion').value.trim();
+  if (!categoria || !nombre) return mostrarMsg('am-msg', 'Categoría y nombre son obligatorios.', false);
+  if (isNaN(precio) || precio < 0) return mostrarMsg('am-msg', 'El precio debe ser un número válido.', false);
+  try {
+    const r = await fetchAuth('/api/admin/menu', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({categoria,nombre,precio,descripcion}) });
+    const data = await r.json();
+    if (!r.ok) return mostrarMsg('am-msg', data.error || 'Error al agregar.', false);
+    document.getElementById('am-nombre').value = '';
+    document.getElementById('am-precio').value = '';
+    document.getElementById('am-descripcion').value = '';
+    mostrarMsg('am-msg', `"${nombre}" agregado al menú.`, true);
+    cargarAdminMenu();
+  } catch { mostrarMsg('am-msg', 'Error de conexión.', false); }
+}
+
+// ---------- SUCURSALES ----------
+
+async function cargarAdminSucursales() {
+  try {
+    const sucursales = await (await fetchAuth('/api/admin/sucursales')).json();
+    renderAdminSucursales(sucursales);
+  } catch { mostrarMsg('as-msg', 'Error cargando sucursales.', false); }
+}
+
+function renderAdminSucursales(sucursales) {
+  const tbody = document.getElementById('tbody-admin-sucursales');
+  tbody.innerHTML = sucursales.length ? sucursales.map(s => `
+    <tr data-id="${s.id}">
+      <td style="font-weight:600">${s.nombre}</td>
+      <td class="celda-input"><input class="admin-input-edit" value="${(s.direccion||'').replace(/"/g,'&quot;')}" data-campo="direccion"></td>
+      <td class="celda-input"><input class="admin-input-edit" value="${s.telefono||''}" data-campo="telefono"></td>
+      <td class="celda-input"><input class="admin-input-edit" value="${s.telefono_transferencia||''}" data-campo="telefono_transferencia"></td>
+      <td class="celda-input"><input class="admin-input-edit" value="${s.whatsapp||''}" data-campo="whatsapp"></td>
+      <td class="celda-input" style="display:flex;gap:0.2rem">
+        <input class="admin-input-edit" style="width:70px" placeholder="Abre" value="${s.horario_apertura||''}" data-campo="horario_apertura">
+        <input class="admin-input-edit" style="width:70px" placeholder="Cierra" value="${s.horario_cierre||''}" data-campo="horario_cierre">
+      </td>
+      <td><button class="btn-accion azul" onclick="guardarSucursal(${s.id}, this)">Guardar</button></td>
+    </tr>`).join('') : '<tr><td colspan="7" class="vacio">Sin sucursales registradas.</td></tr>';
+}
+
+async function guardarSucursal(id, btn) {
+  const fila = btn.closest('tr');
+  const campos = {};
+  fila.querySelectorAll('[data-campo]').forEach(inp => campos[inp.dataset.campo] = inp.value);
+  try {
+    const r = await fetchAuth(`/api/admin/sucursales/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(campos) });
+    const data = await r.json();
+    if (!r.ok) return mostrarMsg('as-msg', data.error || 'Error al guardar.', false);
+    mostrarMsg('as-msg', `Sucursal "${data.nombre}" actualizada.`, true);
+  } catch { mostrarMsg('as-msg', 'Error de conexión.', false); }
+}
+
+// ---------- USUARIOS ----------
+
+async function cargarAdminUsuarios() {
+  try {
+    const usuarios = await (await fetchAuth('/api/admin/usuarios')).json();
+    renderAdminUsuarios(usuarios);
+  } catch { mostrarMsg('au-msg', 'Error cargando usuarios.', false); }
+}
+
+function renderAdminUsuarios(usuarios) {
+  const tbody = document.getElementById('tbody-admin-usuarios');
+  tbody.innerHTML = usuarios.length ? usuarios.map(u => `
+    <tr>
+      <td style="font-weight:600">${u.usuario}</td>
+      <td>${u.sucursal || '—'}</td>
+      <td><span class="badge" style="background:${u.rol==='gerente'?'#001830':'#1A1A1A'};color:${u.rol==='gerente'?'#1A6FA8':'var(--muted)'}">${u.rol}</span></td>
+      <td class="celda-input"><input class="admin-input-edit" type="text" placeholder="Nueva contraseña (mín. 8)" id="pw-${u.usuario}"></td>
+      <td>
+        <div class="acciones">
+          <button class="btn-accion azul" onclick="guardarPasswordUsuario('${u.usuario}')">Actualizar</button>
+          <button class="btn-accion rojo" onclick="eliminarUsuarioUI('${u.usuario}')">Eliminar</button>
+        </div>
+      </td>
+    </tr>`).join('') : '<tr><td colspan="5" class="vacio">Sin usuarios registrados.</td></tr>';
+}
+
+async function guardarPasswordUsuario(usuario) {
+  const input = document.getElementById('pw-'+usuario);
+  const password = input.value;
+  if (password.length < 8) return mostrarMsg('au-msg', 'La contraseña debe tener al menos 8 caracteres.', false);
+  try {
+    const r = await fetchAuth(`/api/admin/usuarios/${usuario}/password`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password}) });
+    const data = await r.json();
+    if (!r.ok) return mostrarMsg('au-msg', data.error || 'Error al actualizar.', false);
+    input.value = '';
+    mostrarMsg('au-msg', `Contraseña de "${usuario}" actualizada.`, true);
+  } catch { mostrarMsg('au-msg', 'Error de conexión.', false); }
+}
+
+async function eliminarUsuarioUI(usuario) {
+  if (!confirm(`¿Eliminar el acceso de "${usuario}"? Ya no podrá iniciar sesión.`)) return;
+  try {
+    const r = await fetchAuth(`/api/admin/usuarios/${usuario}`, { method:'DELETE' });
+    const data = await r.json();
+    if (!r.ok) return mostrarMsg('au-msg', data.error || 'Error al eliminar.', false);
+    mostrarMsg('au-msg', `Usuario "${usuario}" eliminado.`, true);
+    cargarAdminUsuarios();
+  } catch { mostrarMsg('au-msg', 'Error de conexión.', false); }
+}
+
+async function agregarUsuario() {
+  const usuario = document.getElementById('au-usuario').value.trim().toLowerCase();
+  const password = document.getElementById('au-password').value;
+  const sucursal = document.getElementById('au-sucursal').value.trim();
+  const rol = document.getElementById('au-rol').value;
+  if (!usuario || !password) return mostrarMsg('au-msg', 'Usuario y contraseña son obligatorios.', false);
+  if (password.length < 8) return mostrarMsg('au-msg', 'La contraseña debe tener al menos 8 caracteres.', false);
+  try {
+    const r = await fetchAuth('/api/admin/usuarios', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({usuario,password,sucursal,rol}) });
+    const data = await r.json();
+    if (!r.ok) return mostrarMsg('au-msg', data.error || 'Error al crear usuario.', false);
+    document.getElementById('au-usuario').value = '';
+    document.getElementById('au-password').value = '';
+    document.getElementById('au-sucursal').value = '';
+    mostrarMsg('au-msg', `Usuario "${usuario}" creado.`, true);
+    cargarAdminUsuarios();
+  } catch { mostrarMsg('au-msg', 'Error de conexión.', false); }
+}
 </script>
 </body>
 </html>
