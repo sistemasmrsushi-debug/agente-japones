@@ -82,7 +82,10 @@ tr:hover td{background:var(--gris1)}
 .sc-stats{display:flex;gap:1.5rem}
 .sc-num{font-size:1.6rem;font-weight:700;line-height:1}
 .sc-lbl{font-size:0.55rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted)}
-.alerta-banner{position:fixed;top:0;left:0;right:0;z-index:999;background:var(--turquesa);color:var(--blanco);padding:0.7rem 1.5rem;font-size:0.8rem;display:none;align-items:center;justify-content:space-between}
+.alerta-banner{position:fixed;top:0;left:0;right:0;z-index:999;background:var(--turquesa);color:var(--blanco);padding:0.7rem 1.5rem;font-size:0.8rem;display:none;align-items:center;justify-content:space-between;transition:background 0.3s}
+.alerta-banner.urgente{background:var(--rojo)}
+.fila-urgente{background:rgba(192,57,43,0.1) !important}
+.fila-urgente td:first-child{border-left:3px solid var(--rojo)}
 .alerta-close{background:none;border:none;color:var(--blanco);cursor:pointer;font-size:1.2rem}
 .admin-sub{display:none}.admin-sub.active{display:block}
 .admin-form{display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;margin-bottom:0.8rem;padding:0.9rem;background:var(--carbon);border:1px solid var(--borde)}
@@ -293,7 +296,8 @@ async function cargarPedidos() {
     if (pendientes.length > 0) {
       // Mientras exista AL MENOS UN pedido pendiente (nuevo o de hace rato), seguir alertando.
       // No dejar de sonar solo porque ya se avisó una vez — hasta que se acepte el pedido.
-      mostrarAlerta(`🍣 Tienes ${pendientes.length} pedido${pendientes.length>1?'s':''} pendiente${pendientes.length>1?'s':''} en ${sesion.sucursal||'sucursal'}`);
+      const hayUrgente = pendientes.some(esUrgente);
+      mostrarAlerta(`🍣 Tienes ${pendientes.length} pedido${pendientes.length>1?'s':''} pendiente${pendientes.length>1?'s':''} en ${sesion.sucursal||'sucursal'}`, hayUrgente);
     } else {
       detenerAlarma();
       cerrarAlerta();
@@ -337,10 +341,15 @@ function actualizarStats(pedidos) {
   document.getElementById('s-listos').textContent     = ph.filter(p=>p.estado==='listo').length;
 }
 
+function esUrgente(p) {
+  return p.estado === 'pendiente' && (Date.now() - new Date(p.fecha).getTime()) > 5 * 60 * 1000;
+}
+
 function filaP(p) {
   const items = Array.isArray(p.items) ? p.items.map(i=>`${i.cantidad||1}× ${i.nombre}`).join(', ') : (p.items||'—');
   const total = Array.isArray(p.items) ? p.items.reduce((s,i)=>s+(i.precio||0)*(i.cantidad||1),0) : '—';
   const hora = new Date(p.fecha).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+  const urgente = esUrgente(p);
   const esGerente = sesion?.rol==='gerente';
   const acciones = p.estado==='pendiente' ? `
     <button class="btn-accion verde" onclick="aceptarPedido('${p.id}')">✓ Aceptar pedido</button>
@@ -363,8 +372,8 @@ function filaP(p) {
   const gpsHtml = p.ubicacion_gps?.maps_url
     ? `<div style="margin-top:0.3rem"><a href="${p.ubicacion_gps.maps_url}" target="_blank" style="color:var(--verde);font-size:0.6rem;text-decoration:none">📌 Ver en mapa</a></div>`
     : '';
-  return `<tr>
-    <td><div style="font-size:0.6rem;color:var(--muted)">${p.id}</div><div style="font-size:0.65rem;color:var(--muted)">${hora}</div></td>
+  return `<tr class="${urgente?'fila-urgente':''}">
+    <td><div style="font-size:0.6rem;color:var(--muted)">${p.id}</div><div style="font-size:0.65rem;color:${urgente?'var(--rojo)':'var(--muted)'}">${hora}${urgente?' ⚠ 5+ min':''}</div></td>
     <td>${telLink}</td>
     <td>${items}${direccionHtml}${gpsHtml}</td>
     <td>${p.sucursal||'—'}</td>
@@ -461,6 +470,7 @@ function cambiarTab(tab) {
 
 let alarmaInterval = null;
 let alarmaCtx = null;
+let alarmaEsUrgente = false;
 
 function reproducirBeep() {
   try {
@@ -477,14 +487,16 @@ function reproducirBeep() {
   } catch(e) {}
 }
 
-function iniciarAlarma() {
-  if (alarmaInterval) return; // ya esta sonando
+function iniciarAlarma(urgente = false) {
+  if (alarmaInterval && alarmaEsUrgente === urgente) return; // ya sonando al ritmo correcto
+  if (alarmaInterval) clearInterval(alarmaInterval); // cambio de ritmo: normal -> urgente
+  alarmaEsUrgente = urgente;
   reproducirBeep();
-  alarmaInterval = setInterval(reproducirBeep, 2000);
+  alarmaInterval = setInterval(reproducirBeep, urgente ? 800 : 2000);
 }
 
 function detenerAlarma() {
-  if (alarmaInterval) { clearInterval(alarmaInterval); alarmaInterval = null; }
+  if (alarmaInterval) { clearInterval(alarmaInterval); alarmaInterval = null; alarmaEsUrgente = false; }
 }
 
 function reproducirSonido() { iniciarAlarma(); }
@@ -517,10 +529,12 @@ async function aceptarPedido(id) {
   cargarDatos();
 }
 
-function mostrarAlerta(texto) {
-  document.getElementById('alerta-texto').textContent = texto + ' — Haz click en "Aceptar pedido"';
-  document.getElementById('alerta-banner').style.display = 'flex';
-  if (sonidoActivado) iniciarAlarma();
+function mostrarAlerta(texto, urgente = false) {
+  const banner = document.getElementById('alerta-banner');
+  document.getElementById('alerta-texto').textContent = texto + (urgente ? ' — ¡Más de 5 min sin aceptar!' : ' — Haz click en "Aceptar pedido"');
+  banner.classList.toggle('urgente', urgente);
+  banner.style.display = 'flex';
+  if (sonidoActivado) iniciarAlarma(urgente);
   // NO se cierra sola — solo se cierra al aceptar el pedido
 }
 function cerrarAlerta() { document.getElementById('alerta-banner').style.display='none'; }
