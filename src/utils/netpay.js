@@ -66,12 +66,16 @@ async function generarLinkPago({ items, referencia, telefono, nombreCliente, sec
         logger.info(`Respuesta Netpay checkout/session -> status: ${res.statusCode}, body: ${data.substring(0, 300)}`);
         try {
           const json = JSON.parse(data);
-          if (res.statusCode === 200 && json.shortUrl) {
-            logger.info(`Link de pago generado para ${referencia}: ${json.shortUrl}`);
+          // Netpay responde 201 (Created) cuando genera el link correctamente, no 200.
+          // Y el link viene en "hostedCheckoutUrl", no en "shortUrl" (se dejaba shortUrl
+          // como respaldo por si en otra version de la API si viene con ese nombre).
+          const link = json.hostedCheckoutUrl || json.shortUrl;
+          if ((res.statusCode === 200 || res.statusCode === 201) && link) {
+            logger.info(`Link de pago generado para ${referencia}: ${link}`);
             resolve({
               exito: true,
-              linkPago: json.shortUrl,
-              sessionId: json.sessionId || null,
+              linkPago: link,
+              sessionId: json.sessionId || json.id || null,
               raw: json,
             });
           } else {
