@@ -61,7 +61,13 @@ function pideDomicilio(texto) {
 
 // ── Detecta si el mensaje tiene una direccion ─────────────────────────────────
 function tieneDireccion(texto) {
-  return /\b(calle|avenida|av[. ]|col[. ]|colonia|blvd|calzada|privada|cerrada|circuito|fracc|\d{5})\b/i.test(texto);
+  if (/\b(calle|avenida|av[. ]|col[. ]|colonia|blvd|calzada|privada|cerrada|circuito|fracc|\d{5})\b/i.test(texto)) {
+    return true;
+  }
+  // Respaldo: direcciones reales a veces no usan ninguna de esas palabras
+  // (ej. "20 de tenayuca 134, arbolillo, Gustavo a Madero"). Un numero + coma
+  // es tipico del patron "calle numero, colonia, municipio".
+  return /\d/.test(texto) && texto.includes(",");
 }
 
 // ── Extrae items del historial con precios REALES del menu ────────────────────
@@ -216,7 +222,12 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
     }
 
     // ── CASO 2: Cliente da su direccion (viene del flujo normal) ──────────
-    if (estado?.fase === "esperando_direccion" && tieneDireccion(mensaje)) {
+    // NOTA: ya no exige tieneDireccion(mensaje) aqui. Si el bot ya pidio la direccion
+    // en el turno anterior (fase=esperando_direccion), CUALQUIER respuesta del cliente
+    // es su intento de direccion -- depender de palabras clave (calle/avenida/CP, etc.)
+    // causaba que reintentos sin esas palabras (ej. sin repetir el CP) se perdieran
+    // en silencio, sin validar ni responder nada mas.
+    if (estado?.fase === "esperando_direccion") {
       logger.info(`Direccion recibida, validando con Google Maps...`);
 
       // Validar direccion con Google Maps
