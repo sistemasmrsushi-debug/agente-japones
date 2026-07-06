@@ -29,6 +29,15 @@ async function validarDireccion(direccionTexto) {
     }
 
     const resultado = data.results[0];
+
+    // Google marca "partial_match: true" cuando NO encontro exactamente la direccion
+    // pedida, pero regresa "lo mas parecido" (ej. la colonia correcta, pero una calle
+    // distinta). Sin este chequeo, se aceptaban direcciones equivocadas como validas.
+    if (resultado.partial_match) {
+      logger.warn(`Coincidencia parcial (poco confiable): "${direccionTexto}" -> "${resultado.formatted_address}"`);
+      return { valida: false, direccion: direccionTexto, coords: null, error: "coincidencia_parcial" };
+    }
+
     const coords = resultado.geometry.location;
     const direccionNormalizada = resultado.formatted_address
       .replace(", Mexico", "")

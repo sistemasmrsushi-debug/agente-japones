@@ -265,7 +265,15 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
 
       // Validar direccion con Google Maps
       const geoResult = await validarDireccion(mensaje);
-      const dirFinal = geoResult.valida ? geoResult.direccion : mensaje;
+
+      if (!geoResult.valida) {
+        await enviarMensaje(telefono,
+          `No pudimos confirmar esa direccion. Por favor verifica e intenta de nuevo con calle, numero, colonia y municipio.`
+        );
+        return;
+      }
+
+      const dirFinal = geoResult.direccion;
       const zona = detectarSucursalPorZona(dirFinal) || detectarSucursalPorZona(mensaje);
 
       if (zona) {
