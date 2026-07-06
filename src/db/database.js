@@ -222,7 +222,10 @@ async function guardarHistorial(telefono, historial) {
 
 async function guardarEstadoPedido(telefono, estado) {
   const key = telefono + "_estado";
-  const valor = JSON.stringify(estado);
+  // _ts marca cuando se guardo este estado, para poder detectar conversaciones
+  // abandonadas (ej. cliente nunca respondio) y no confundir un mensaje nuevo
+  // de horas despues con la respuesta que se estaba esperando.
+  const valor = JSON.stringify({ ...estado, _ts: Date.now() });
   await pool.query(
     "INSERT INTO conversaciones (telefono, historial, actualizado) VALUES ($1, $2::jsonb, NOW()) ON CONFLICT (telefono) DO UPDATE SET historial = $2::jsonb, actualizado = NOW()",
     [key, valor]

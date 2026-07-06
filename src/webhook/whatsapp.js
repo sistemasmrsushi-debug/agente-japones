@@ -130,7 +130,28 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
     logger.info(`Msg de ${telefono}: ${mensaje.substring(0, 80)}`);
 
     // ── CASO 1: Cliente confirma sucursal sugerida ────────────────────────
-    const estado = await db.obtenerEstadoPedido(telefono);
+    let estado = await db.obtenerEstadoPedido(telefono);
+
+    // Si el estado quedo abandonado (el cliente nunca respondio, o se fue a otra
+    // cosa y regreso horas despues), ignorarlo -- si no, un saludo nuevo como
+    // "hola quiero hacer un pedido" se intentaria validar como si fuera una
+    // direccion, porque el sistema seguiria pensando que la esta esperando.
+    const ESTADO_EXPIRA_MS = 30 * 60 * 1000; // 30 minutos
+    if (estado?._ts && (Date.now() - estado._ts > ESTADO_EXPIRA_MS)) {
+      logger.info(`Estado abandonado (fase=${estado.fase}) ignorado por antiguedad para ${telefono}`);
+      await db.eliminarEstadoPedido(telefono);
+      estado = null;
+    }
+
+    // Si el cliente claramente quiere empezar de nuevo, no tratar su mensaje
+    // como si fuera la direccion/confirmacion que se estaba esperando.
+    const quiereReiniciar = /\b(hola|buenas|buenos dias|buenas tardes|buenas noches|otro pedido|nuevo pedido|cancelar)\b/i.test(mensaje.trim());
+    if (estado && quiereReiniciar && mensaje.trim().split(/\s+/).length <= 8) {
+      logger.info(`Cliente reinicio conversacion (estaba en fase=${estado.fase}) para ${telefono}`);
+      await db.eliminarEstadoPedido(telefono);
+      estado = null;
+    }
+
     if (estado?.fase === "esperando_confirmacion_sucursal" && esConfirmacion(mensaje)) {
       // Verificar si el cliente eligio una sucursal diferente
       const restaurante = require("../../config/restaurante");
