@@ -176,7 +176,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
 
       // Generar link de pago con Netpay
       const resultadoPago = await generarLinkPago({
-        monto: total,
+        items,
         referencia: pedido.id,
         telefono: telefono,
       });
@@ -287,7 +287,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         });
         logger.info(`Estado guardado (caso3): ${zona}, items: ${items.length}`);
         await enviarMensaje(telefono,
-          `La sucursal mas cercana a tu zona es *${zona}*. Te enviamos desde ahi o prefieres otra?`
+          `Direccion confirmada: ${dirFinal}\n\nLa sucursal mas cercana a tu zona es *${zona}*. Te enviamos desde ahi o prefieres otra?`
         );
         return;
       }

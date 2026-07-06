@@ -14,7 +14,7 @@ function getHostname() {
 }
 
 // ── GENERAR LINK DE PAGO ──────────────────────────────────────────────────────
-async function generarLinkPago({ monto, referencia, telefono, secretKey }) {
+async function generarLinkPago({ items, referencia, telefono, nombreCliente, secretKey }) {
   return new Promise((resolve, reject) => {
     const key = secretKey || process.env.NETPAY_SECRET_KEY;
 
@@ -23,17 +23,29 @@ async function generarLinkPago({ monto, referencia, telefono, secretKey }) {
       return resolve({ exito: false, error: "Falta configurar NETPAY_SECRET_KEY" });
     }
 
+    // Netpay espera los productos como arreglo "lineItems" (name, amount, quantity, currency),
+    // no como un monto plano. Sin esto, el checkout/session responde 404 "StoreUser not found"
+    // en vez de un error de validacion claro (confirmado comparando contra una prueba en Postman
+    // que si funciono, usando la misma llave, pero con lineItems en vez de "amount").
+    const lineItems = (items || []).map(i => ({
+      name: i.nombre,
+      amount: i.precio,
+      quantity: i.cantidad || 1,
+      currency: "MXN",
+    }));
+
     const body = JSON.stringify({
       successUrl: `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/pago/exitoso`,
       cancelUrl: `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/pago/cancelado`,
       customerEmail: "cliente@mrsushi.mx",
-      customerName: telefono || "Cliente Mr. Sushi",
+      customerName: nombreCliente || telefono || "Cliente Mr. Sushi",
       paymentMethodTypes: ["card"],
       merchantRefCode: referencia,
-      amount: monto,
+      lineItems,
+      linkType: "NETPAY_CHECKOUT",
     });
 
-    logger.info(`Generando link de pago Netpay -> hostname: ${getHostname()}, referencia: ${referencia}, monto: ${monto}`);
+    logger.info(`Generando link de pago Netpay -> hostname: ${getHostname()}, referencia: ${referencia}, items: ${lineItems.length}`);
 
     const options = {
       hostname: getHostname(),
