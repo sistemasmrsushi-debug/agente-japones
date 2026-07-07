@@ -30,12 +30,22 @@ async function validarDireccion(direccionTexto) {
 
     const resultado = data.results[0];
 
-    // Google marca "partial_match: true" cuando NO encontro exactamente la direccion
-    // pedida, pero regresa "lo mas parecido" (ej. la colonia correcta, pero una calle
-    // distinta). Sin este chequeo, se aceptaban direcciones equivocadas como validas.
+    // Google marca "partial_match: true" en casos muy distintos: a veces la calle
+    // es completamente otra (peligroso, ej. "Faisan Local 72" en vez de "Lomas
+    // Verdes 22"), y a veces es la MISMA calle y numero pero con la colonia
+    // nombrada un poco distinto o el CP con 1 digito diferente (inofensivo, ej.
+    // "la altena" vs "Lomas Verdes Altena III"). Rechazar todo por igual bloqueaba
+    // direcciones correctas. Ahora solo se rechaza si el numero de calle que
+    // escribio el cliente NO aparece en la respuesta de Google -- esa es la señal
+    // confiable de que sí cambio la calle real, no solo el nombre de la colonia.
     if (resultado.partial_match) {
-      logger.warn(`Coincidencia parcial (poco confiable): "${direccionTexto}" -> "${resultado.formatted_address}"`);
-      return { valida: false, direccion: direccionTexto, coords: null, error: "coincidencia_parcial" };
+      const numeroCliente = direccionTexto.match(/\d+/)?.[0];
+      const calleCoincide = numeroCliente && resultado.formatted_address.includes(numeroCliente);
+      if (!calleCoincide) {
+        logger.warn(`Coincidencia parcial (poco confiable): "${direccionTexto}" -> "${resultado.formatted_address}"`);
+        return { valida: false, direccion: direccionTexto, coords: null, error: "coincidencia_parcial" };
+      }
+      logger.info(`Coincidencia parcial aceptada (mismo numero de calle): "${direccionTexto}" -> "${resultado.formatted_address}"`);
     }
 
     const coords = resultado.geometry.location;
