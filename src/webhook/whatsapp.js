@@ -5,7 +5,7 @@ const twilioLib = require("twilio");
 const { procesarMensaje, detectarSucursalPorZona, buscarPlatillo } = require("../agent/agente");
 const logger = require("../utils/logger");
 const db = require("../db/database");
-const { validarDireccion } = require("../utils/geocoding");
+const { validarDireccion, calcularDistanciaKm } = require("../utils/geocoding");
 const { generarLinkPago } = require("../utils/netpay");
 
 function getTwilioClient() {
@@ -68,6 +68,55 @@ function tieneDireccion(texto) {
   // (ej. "20 de tenayuca 134, arbolillo, Gustavo a Madero"). Un numero + coma
   // es tipico del patron "calle numero, colonia, municipio".
   return /\d/.test(texto) && texto.includes(",");
+}
+
+const RADIO_ENTREGA_KM = 5;
+
+// Decide la sucursal final que atendera un domicilio, respetando un radio maximo
+// de entrega. Mantiene el sistema de palabras clave (zonaSugerida) como primer
+// intento -- solo busca alternativas si esa sucursal queda demasiado lejos.
+async function resolverSucursalPorDistancia(zonaSugerida, coordsCliente) {
+  // Sin coordenadas del cliente no hay forma de medir distancia -- se deja
+  // pasar tal cual (mismo comportamiento que antes de este cambio).
+  if (!coordsCliente) {
+    return { sucursal: zonaSugerida, dentroDeRadio: true, cambio: false };
+  }
+
+  const sucursales = await db.obtenerSucursales();
+  const conCoords = sucursales.filter(s => s.lat && s.lng);
+
+  // Si todavia no se ha corrido el script de geocodificacion de sucursales,
+  // no hay con que comparar -- no bloquear pedidos por esto.
+  if (conCoords.length === 0) {
+    return { sucursal: zonaSugerida, dentroDeRadio: true, cambio: false };
+  }
+
+  const distanciaA = (s) => calcularDistanciaKm(coordsCliente.lat, coordsCliente.lng, Number(s.lat), Number(s.lng));
+
+  if (zonaSugerida) {
+    const sucursalAsignada = conCoords.find(s => s.nombre === zonaSugerida);
+    if (sucursalAsignada) {
+      const dist = distanciaA(sucursalAsignada);
+      if (dist <= RADIO_ENTREGA_KM) {
+        return { sucursal: zonaSugerida, dentroDeRadio: true, cambio: false };
+      }
+      logger.info(`${zonaSugerida} queda a ${dist.toFixed(1)} km del cliente (fuera del radio de ${RADIO_ENTREGA_KM} km). Buscando otra sucursal...`);
+    }
+  }
+
+  // La sugerida por zona no existe o quedo fuera de rango -- buscar la mas
+  // cercana entre TODAS las sucursales geocodificadas.
+  let mejor = null, mejorDist = Infinity;
+  for (const s of conCoords) {
+    const d = distanciaA(s);
+    if (d < mejorDist) { mejorDist = d; mejor = s; }
+  }
+
+  if (mejor && mejorDist <= RADIO_ENTREGA_KM) {
+    return { sucursal: mejor.nombre, dentroDeRadio: true, cambio: mejor.nombre !== zonaSugerida };
+  }
+
+  return { sucursal: null, dentroDeRadio: false, cambio: false };
 }
 
 // ── Extrae items del historial con precios REALES del menu ────────────────────
@@ -264,7 +313,22 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       // Usar direccion normalizada por Google
       const dirFinal = geoResult.direccion;
       const zona = detectarSucursalPorZona(dirFinal) || detectarSucursalPorZona(mensaje);
-      const sucursalSugerida = zona || "Por confirmar";
+
+      // Filtro de radio de entrega: confirma que la sucursal (por zona) quede
+      // razonablemente cerca del cliente; si no, busca la sucursal real mas
+      // cercana; si ninguna cae dentro del radio, se ofrece recoger en sucursal
+      // en vez de domicilio.
+      const resolucion = await resolverSucursalPorDistancia(zona, geoResult.coords);
+
+      if (!resolucion.dentroDeRadio) {
+        await db.eliminarEstadoPedido(telefono); // limpiar estado para que el siguiente mensaje fluya normal con la IA
+        await enviarMensaje(telefono,
+          `Tu direccion (${dirFinal}) queda fuera de nuestra zona de entrega a domicilio (radio de ${RADIO_ENTREGA_KM} km de cualquiera de nuestras sucursales). ¿Prefieres recoger tu pedido en alguna sucursal? Tenemos: ${require("../../config/restaurante").sucursales.map(s=>s.nombre).join(", ")}`
+        );
+        return;
+      }
+
+      const sucursalSugerida = resolucion.sucursal || "Por confirmar";
       logger.info(`Direccion validada: "${dirFinal}" -> Zona: ${sucursalSugerida}`);
 
       await db.guardarEstadoPedido(telefono, {
@@ -277,9 +341,14 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         maps_url: geoResult.maps_url || null,
       });
 
-      if (zona) {
+      if (resolucion.cambio) {
+        // La sucursal por zona quedaba fuera de rango; se ofrece la real mas cercana.
         await enviarMensaje(telefono,
-          `Direccion confirmada: ${dirFinal}\n\nLa sucursal mas cercana a tu zona es *${zona}*. Te enviamos desde ahi o prefieres otra?`
+          `Direccion confirmada: ${dirFinal}\n\n${zona ? `La sucursal de tu zona (${zona}) queda un poco lejos, pero ` : ""}*${sucursalSugerida}* si te puede atender dentro de nuestro rango de entrega. Te enviamos desde ahi o prefieres otra?`
+        );
+      } else if (resolucion.sucursal) {
+        await enviarMensaje(telefono,
+          `Direccion confirmada: ${dirFinal}\n\nLa sucursal mas cercana a tu zona es *${sucursalSugerida}*. Te enviamos desde ahi o prefieres otra?`
         );
       } else {
         await enviarMensaje(telefono,
@@ -316,19 +385,39 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
             })
           : extraerItemsConPreciosReales(resultado.historialActualizado);
 
+        // Filtro de radio de entrega, igual que en el CASO 2.
+        const resolucion = await resolverSucursalPorDistancia(zona, geoResult.coords);
+
+        if (!resolucion.dentroDeRadio) {
+          await db.eliminarEstadoPedido(telefono);
+          await enviarMensaje(telefono,
+            `Tu direccion (${dirFinal}) queda fuera de nuestra zona de entrega a domicilio (radio de ${RADIO_ENTREGA_KM} km de cualquiera de nuestras sucursales). ¿Prefieres recoger tu pedido en alguna sucursal? Tenemos: ${require("../../config/restaurante").sucursales.map(s=>s.nombre).join(", ")}`
+          );
+          return;
+        }
+
+        const sucursalFinal = resolucion.sucursal;
+
         await db.guardarEstadoPedido(telefono, {
           fase: "esperando_confirmacion_sucursal",
-          sucursal_sugerida: zona,
+          sucursal_sugerida: sucursalFinal,
           items,
           direccion: dirFinal,
           colonia: geoResult.colonia || null,
           coords: geoResult.coords || null,
           maps_url: geoResult.maps_url || null,
         });
-        logger.info(`Estado guardado (caso3): ${zona}, items: ${items.length}`);
-        await enviarMensaje(telefono,
-          `Direccion confirmada: ${dirFinal}\n\nLa sucursal mas cercana a tu zona es *${zona}*. Te enviamos desde ahi o prefieres otra?`
-        );
+        logger.info(`Estado guardado (caso3): ${sucursalFinal}, items: ${items.length}`);
+
+        if (resolucion.cambio) {
+          await enviarMensaje(telefono,
+            `Direccion confirmada: ${dirFinal}\n\nLa sucursal de tu zona (${zona}) queda un poco lejos, pero *${sucursalFinal}* si te puede atender dentro de nuestro rango de entrega. Te enviamos desde ahi o prefieres otra?`
+          );
+        } else {
+          await enviarMensaje(telefono,
+            `Direccion confirmada: ${dirFinal}\n\nLa sucursal mas cercana a tu zona es *${sucursalFinal}*. Te enviamos desde ahi o prefieres otra?`
+          );
+        }
         return;
       }
     }

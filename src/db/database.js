@@ -68,9 +68,15 @@ async function initDB() {
         whatsapp TEXT,
         horario_apertura TEXT,
         horario_cierre TEXT,
+        lat NUMERIC,
+        lng NUMERIC,
         actualizado TIMESTAMPTZ DEFAULT NOW()
       );
     `);
+    // La tabla "sucursales" ya existia en produccion antes de agregar lat/lng
+    // (necesarias para calcular distancia real al domicilio del cliente).
+    await client.query(`ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS lat NUMERIC;`);
+    await client.query(`ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS lng NUMERIC;`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS menu_items (
         id SERIAL PRIMARY KEY,
@@ -285,6 +291,12 @@ async function insertarSucursalSiNoExiste(s) {
   `, [s.id, s.nombre, s.tipo, s.zona, s.direccion, s.telefono, s.telefono_transferencia, s.whatsapp, s.horario_apertura || null, s.horario_cierre || null]);
 }
 
+// Guarda las coordenadas de una sucursal (usado por el script de geocodificacion
+// y, si en el futuro cambia la direccion de una sucursal, para re-geocodificarla).
+async function actualizarCoordenadasSucursal(id, lat, lng) {
+  await pool.query("UPDATE sucursales SET lat = $1, lng = $2, actualizado = NOW() WHERE id = $3", [lat, lng, id]);
+}
+
 // ── MENU (editable desde el panel) ───────────────────────────────────────────
 
 async function obtenerMenu() {
@@ -416,6 +428,7 @@ module.exports = {
   obtenerSucursales,
   actualizarSucursal,
   insertarSucursalSiNoExiste,
+  actualizarCoordenadasSucursal,
   obtenerMenu,
   crearItemMenu,
   actualizarItemMenu,
