@@ -25,6 +25,9 @@ async function initDB() {
         tipo TEXT DEFAULT 'sucursal',
         direccion TEXT,
         colonia TEXT,
+        municipio TEXT,
+        estado_direccion TEXT,
+        codigo_postal TEXT,
         referencias TEXT,
         ubicacion_gps JSONB,
         actualizado TIMESTAMPTZ
@@ -34,6 +37,11 @@ async function initDB() {
     // CREATE TABLE IF NOT EXISTS no modifica tablas ya creadas, por eso este ALTER
     // explicito es necesario para que la columna aparezca en la base de datos real.
     await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS nombre_cliente TEXT;`);
+    // Para precargar los datos de facturacion en el checkout de Netpay y que
+    // el cliente no tenga que volver a escribir toda su direccion ahi.
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS municipio TEXT;`);
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS estado_direccion TEXT;`);
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS codigo_postal TEXT;`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS reservaciones (
         id TEXT PRIMARY KEY,
@@ -111,8 +119,8 @@ async function initDB() {
 
 async function guardarPedido(pedido) {
   await pool.query(`
-    INSERT INTO pedidos (id, fecha, estado, telefono_cliente, nombre_cliente, sucursal, items, tipo, direccion, colonia, referencias, ubicacion_gps)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+    INSERT INTO pedidos (id, fecha, estado, telefono_cliente, nombre_cliente, sucursal, items, tipo, direccion, colonia, municipio, estado_direccion, codigo_postal, referencias, ubicacion_gps)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
     ON CONFLICT (id) DO UPDATE SET
       estado = EXCLUDED.estado,
       nombre_cliente = COALESCE(EXCLUDED.nombre_cliente, pedidos.nombre_cliente),
@@ -123,7 +131,8 @@ async function guardarPedido(pedido) {
   `, [
     pedido.id, pedido.fecha, pedido.estado, pedido.telefono_cliente, pedido.nombre_cliente || null,
     pedido.sucursal, JSON.stringify(pedido.items), pedido.tipo,
-    pedido.direccion, pedido.colonia, pedido.referencias,
+    pedido.direccion, pedido.colonia, pedido.municipio || null, pedido.estado_direccion || null, pedido.codigo_postal || null,
+    pedido.referencias,
     pedido.ubicacion_gps ? JSON.stringify(pedido.ubicacion_gps) : null
   ]);
 }

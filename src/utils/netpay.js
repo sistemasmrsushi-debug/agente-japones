@@ -14,7 +14,7 @@ function getHostname() {
 }
 
 // ── GENERAR LINK DE PAGO ──────────────────────────────────────────────────────
-async function generarLinkPago({ items, referencia, telefono, nombreCliente, secretKey }) {
+async function generarLinkPago({ items, referencia, telefono, nombreCliente, direccion, colonia, municipio, estadoDireccion, codigoPostal, secretKey }) {
   return new Promise((resolve, reject) => {
     const key = secretKey || process.env.NETPAY_SECRET_KEY;
 
@@ -34,14 +34,41 @@ async function generarLinkPago({ items, referencia, telefono, nombreCliente, sec
       currency: "MXN",
     }));
 
+    // Telefono limpio, sin el prefijo "whatsapp:"
+    const telefonoLimpio = (telefono || "").replace("whatsapp:", "").replace("+", "");
+
+    // Nombre y apellido separados lo mejor posible a partir del nombre que dio
+    // el cliente en la conversacion (ej. "Diego Gonzalez" -> "Diego" / "Gonzalez").
+    const partesNombre = (nombreCliente || "Cliente Mr. Sushi").trim().split(/\s+/);
+    const firstName = partesNombre[0] || "Cliente";
+    const lastName = partesNombre.slice(1).join(" ") || "Mr. Sushi";
+
+    // Precargar los datos de facturacion que ya tenemos de la conversacion, para
+    // que el cliente no tenga que volver a escribir todo en el checkout de Netpay.
+    const billing = {
+      firstName,
+      lastName,
+      email: "cliente@mrsushi.mx",
+      phone: telefonoLimpio,
+      address: {
+        street1: direccion || "",
+        street2: "",
+        city: municipio || "",
+        state: estadoDireccion || "",
+        postalCode: codigoPostal || "",
+        country: "Mexico",
+      },
+    };
+
     const body = JSON.stringify({
       successUrl: `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/pago/exitoso`,
       cancelUrl: `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/pago/cancelado`,
-      customerEmail: "cliente@mrsushi.mx",
-      customerName: nombreCliente || telefono || "Cliente Mr. Sushi",
+      customerEmail: billing.email,
+      customerName: `${firstName} ${lastName}`,
       paymentMethodTypes: ["card"],
       merchantRefCode: referencia,
       lineItems,
+      billing,
       linkType: "NETPAY_CHECKOUT",
     });
 

@@ -199,6 +199,12 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         items: pedidoPendiente.items,
         referencia: pedidoPendiente.id,
         telefono: telefono,
+        nombreCliente: pedidoPendiente.nombre_cliente,
+        direccion: pedidoPendiente.direccion,
+        colonia: pedidoPendiente.colonia,
+        municipio: pedidoPendiente.municipio,
+        estadoDireccion: pedidoPendiente.estado_direccion,
+        codigoPostal: pedidoPendiente.codigo_postal,
       });
 
       if (resultadoPago.exito) {
@@ -270,11 +276,15 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         fecha: new Date().toISOString(),
         estado: "pendiente_pago",
         telefono_cliente: telefono,
+        nombre_cliente: estado.nombre_cliente || null,
         sucursal: estado.sucursal_sugerida,
         items,
         tipo: "domicilio",
         direccion: estado.direccion || null,
         colonia: estado.colonia || null,
+        municipio: estado.municipio || null,
+        estado_direccion: estado.estado_direccion || null,
+        codigo_postal: estado.codigo_postal || null,
         referencias: estado.referencias || null,
         ubicacion_gps: estado.coords ? {
           latitude: estado.coords.lat,
@@ -295,6 +305,12 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         items,
         referencia: pedido.id,
         telefono: telefono,
+        nombreCliente: pedido.nombre_cliente,
+        direccion: pedido.direccion,
+        colonia: pedido.colonia,
+        municipio: pedido.municipio,
+        estadoDireccion: pedido.estado_direccion,
+        codigoPostal: pedido.codigo_postal,
       });
 
       if (resultadoPago.exito) {
@@ -377,6 +393,9 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         sucursal_sugerida: sucursalSugerida,
         direccion: dirFinal,
         colonia: geoResult.colonia || null,
+        municipio: geoResult.municipio || null,
+        estado_direccion: geoResult.estado || null,
+        codigo_postal: geoResult.codigoPostal || null,
         coords: geoResult.coords || null,
         maps_url: geoResult.maps_url || null,
       });
@@ -444,6 +463,9 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
           items,
           direccion: dirFinal,
           colonia: geoResult.colonia || null,
+          municipio: geoResult.municipio || null,
+          estado_direccion: geoResult.estado || null,
+          codigo_postal: geoResult.codigoPostal || null,
           coords: geoResult.coords || null,
           maps_url: geoResult.maps_url || null,
         });

@@ -54,11 +54,13 @@ async function validarDireccion(direccionTexto) {
       .replace(", México", "")
       .trim();
 
-    // Extraer colonia y municipio
+    // Extraer colonia, municipio, estado y codigo postal (necesarios para
+    // precargar los datos de facturacion en el checkout de Netpay).
     const componentes = resultado.address_components;
     const colonia = componentes.find(c => c.types.includes("sublocality_level_1"))?.long_name || null;
     const municipio = componentes.find(c => c.types.includes("locality"))?.long_name || null;
     const estado = componentes.find(c => c.types.includes("administrative_area_level_1"))?.long_name || null;
+    const codigoPostal = componentes.find(c => c.types.includes("postal_code"))?.long_name || null;
 
     logger.info(`Direccion validada: "${direccionTexto}" -> "${direccionNormalizada}" (${coords.lat}, ${coords.lng})`);
 
@@ -69,6 +71,7 @@ async function validarDireccion(direccionTexto) {
       colonia,
       municipio,
       estado,
+      codigoPostal,
       coords: { lat: coords.lat, lng: coords.lng },
       maps_url: `https://maps.google.com/?q=${coords.lat},${coords.lng}`,
     };
