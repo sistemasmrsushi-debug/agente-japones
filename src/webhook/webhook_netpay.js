@@ -34,6 +34,7 @@ router.post("/webhook/netpay", async (req, res) => {
     const data = req.body;
     const evento = data.event;
     logger.info(`Webhook Netpay recibido: ${evento}`);
+    logger.info(`Payload completo: ${JSON.stringify(data.data)}`);
 
     switch (evento) {
 
@@ -63,8 +64,11 @@ router.post("/webhook/netpay", async (req, res) => {
         break;
       }
 
-      case "sessionLink.failed": {
-        // Pago rechazado
+      case "sessionLink.failed":
+      case "transaction.failed": {
+        // Pago rechazado. Netpay documenta el evento como "sessionLink.failed",
+        // pero en produccion confirmamos (via logs reales) que en la practica
+        // manda "transaction.failed" -- se manejan ambos por si acaso.
         const { transactionId, amount } = data.data;
         logger.warn(`Pago RECHAZADO: transactionId=${transactionId}, monto=${amount}`);
 
