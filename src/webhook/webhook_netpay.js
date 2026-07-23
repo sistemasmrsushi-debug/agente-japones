@@ -49,12 +49,24 @@ router.post("/webhook/netpay", async (req, res) => {
         const referenciaPedido = detalle.merchantReferenceCode;
 
         if (referenciaPedido) {
+          const pedidos = await db.obtenerPedidos(null, "gerente");
+          const pedido = pedidos.find(p => p.id === referenciaPedido);
+
+          // Si el pedido ya NO estaba en "pendiente_pago", este webhook de pago
+          // exitoso llego para un pedido que ya se habia marcado como pagado antes
+          // (ej. alguien pago dos veces con el link viejo y uno nuevo). No lo
+          // volvemos a procesar como si fuera la primera vez -- eso evitaria
+          // mandarle al cliente un segundo "pago confirmado" confuso -- pero se
+          // deja un WARN bien visible, porque esto podria ser un cobro doble real
+          // que requiera reembolso manual por parte del restaurante.
+          if (pedido && pedido.estado !== "pendiente_pago") {
+            logger.warn(`POSIBLE PAGO DUPLICADO: el pedido ${referenciaPedido} ya estaba en estado "${pedido.estado}" cuando llego OTRO webhook de pago exitoso (transactionId=${transactionId}, monto=${amount}). Revisar manualmente si hubo un cobro doble y si procede un reembolso.`);
+            break;
+          }
+
           await db.actualizarEstadoPedido(referenciaPedido, "pendiente"); // pasa de pendiente_pago a pendiente (confirmado, listo para preparar)
           logger.info(`Pedido ${referenciaPedido} marcado como pagado`);
 
-          // Notificar al cliente
-          const pedidos = await db.obtenerPedidos(null, "gerente");
-          const pedido = pedidos.find(p => p.id === referenciaPedido);
           if (pedido?.telefono_cliente) {
             await enviarMensaje(pedido.telefono_cliente,
               `Pago confirmado! Tu pedido ${referenciaPedido} esta siendo preparado.\nTarjeta terminacion ${lastFourDigits || "****"}.\nTiempo estimado: 40 minutos.`
