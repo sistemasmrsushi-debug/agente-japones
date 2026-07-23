@@ -19,6 +19,7 @@ const whatsappRouter = require("./webhook/whatsapp");
 const llamadasRouter = require("./llamadas/llamadas");
 const dashboardRouter = require("./dashboard/dashboard");
 const webhookNetpayRouter = require("./webhook/webhook_netpay");
+const pagoPaginasRouter = require("./webhook/pago_paginas");
 const { initDB } = require("./db/database");
 
 // ── RATE LIMITING ─────────────────────────────────────────────────────────────
@@ -67,6 +68,7 @@ app.use("/", whatsappRouter);
 app.use("/", llamadasRouter);
 app.use("/", dashboardRouter);
 app.use("/", webhookNetpayRouter);
+app.use("/", pagoPaginasRouter);
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString(), app: "Agente Mr. Sushi Call Center" });
