@@ -53,6 +53,12 @@ function esConfirmacion(texto) {
   return false;
 }
 
+// ── Detecta si el cliente quiere reintentar un pago rechazado ─────────────────
+function esReintentarPago(texto) {
+  const t = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  return /\b(reintentar pago|reintentar el pago|otra tarjeta|nuevo link|reenviar link|manda(me)? el link|mandar link|volver a pagar|pagar de nuevo|intentar de nuevo el pago)\b/.test(t);
+}
+
 // ── Detecta si el mensaje pide domicilio ──────────────────────────────────────
 function pideDomicilio(texto) {
   const t = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -177,6 +183,40 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       return;
     }
     logger.info(`Msg de ${telefono}: ${mensaje.substring(0, 80)}`);
+
+    // ── CASO 0: Cliente quiere reintentar un pago rechazado ────────────────
+    if (esReintentarPago(mensaje)) {
+      const pedidoPendiente = await db.obtenerPedidoPendientePagoPorTelefono(telefono);
+
+      if (!pedidoPendiente) {
+        await enviarMensaje(telefono,
+          `No encontramos ningun pedido tuyo esperando pago en este momento. Si quieres hacer un pedido nuevo, dime que te gustaria pedir.`
+        );
+        return;
+      }
+
+      const resultadoPago = await generarLinkPago({
+        items: pedidoPendiente.items,
+        referencia: pedidoPendiente.id,
+        telefono: telefono,
+      });
+
+      if (resultadoPago.exito) {
+        // No se reinicia el temporizador de cancelacion automatica (sigue
+        // corriendo desde la creacion original del pedido) -- el cliente
+        // conserva el mismo limite total de 15 minutos que ya se le informo.
+        await enviarMensaje(telefono,
+          `Aqui tienes un nuevo link de pago para tu pedido ${pedidoPendiente.id}:\n${resultadoPago.linkPago}`
+        );
+        logger.info(`Nuevo link de pago generado (reintento) para ${pedidoPendiente.id}`);
+      } else {
+        await enviarMensaje(telefono,
+          `Tuvimos un problema generando tu nuevo link de pago. Te contactaremos en breve para ayudarte a completar el pago.`
+        );
+        logger.error(`Fallo generacion de link de pago (reintento) para ${pedidoPendiente.id}: ${resultadoPago.error}`);
+      }
+      return;
+    }
 
     // ── CASO 1: Cliente confirma sucursal sugerida ────────────────────────
     let estado = await db.obtenerEstadoPedido(telefono);

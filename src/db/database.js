@@ -139,6 +139,16 @@ async function obtenerPedidos(sucursal, rol) {
   return rows;
 }
 
+// Busca el pedido mas reciente de un cliente que siga esperando pago (para el
+// flujo de "reintentar pago" cuando una tarjeta es rechazada).
+async function obtenerPedidoPendientePagoPorTelefono(telefono) {
+  const { rows } = await pool.query(
+    "SELECT * FROM pedidos WHERE telefono_cliente = $1 AND estado = 'pendiente_pago' ORDER BY fecha DESC LIMIT 1",
+    [telefono]
+  );
+  return rows[0] || null;
+}
+
 async function actualizarEstadoPedido(id, estado) {
   const { rows } = await pool.query(
     "UPDATE pedidos SET estado=$1, actualizado=NOW() WHERE id=$2 RETURNING *",
@@ -416,6 +426,7 @@ module.exports = {
   eliminarEstadoPedido,
   guardarPedido,
   obtenerPedidos,
+  obtenerPedidoPendientePagoPorTelefono,
   actualizarEstadoPedido,
   actualizarGPSPedido,
   obtenerStatsPedidos,
