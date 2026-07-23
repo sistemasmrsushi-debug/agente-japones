@@ -69,15 +69,18 @@ router.post("/webhook/netpay", async (req, res) => {
         // Pago rechazado. Netpay documenta el evento como "sessionLink.failed",
         // pero en produccion confirmamos (via logs reales) que en la practica
         // manda "transaction.failed" -- se manejan ambos por si acaso.
-        const { transactionId, amount } = data.data;
-        logger.warn(`Pago RECHAZADO: transactionId=${transactionId}, monto=${amount}`);
+        //
+        // IMPORTANTE: el campo se llama "transactionTokenId", no "transactionId"
+        // (diferente al payload de "sessionLink.paid"). Y el merchantReferenceCode
+        // ya viene directo en este payload -- no hace falta la consulta extra a
+        // consultarEstatusTransaccion(), que ademas fallaba porque transactionId
+        // siempre era undefined.
+        const { transactionTokenId, amount, merchantReferenceCode, responseMsg } = data.data;
+        logger.warn(`Pago RECHAZADO: transactionTokenId=${transactionTokenId}, monto=${amount}, motivo=${responseMsg}, pedido=${merchantReferenceCode}`);
 
-        const detalle = await consultarEstatusTransaccion(transactionId);
-        const referenciaPedido = detalle.merchantReferenceCode;
-
-        if (referenciaPedido) {
+        if (merchantReferenceCode) {
           const pedidos = await db.obtenerPedidos(null, "gerente");
-          const pedido = pedidos.find(p => p.id === referenciaPedido);
+          const pedido = pedidos.find(p => p.id === merchantReferenceCode);
           if (pedido?.telefono_cliente) {
             await enviarMensaje(pedido.telefono_cliente,
               `Tu pago no pudo procesarse. Quieres intentar con otra tarjeta? Responde "reintentar pago" y te mandamos un nuevo link.`
