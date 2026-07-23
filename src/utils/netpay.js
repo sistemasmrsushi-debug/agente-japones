@@ -45,10 +45,21 @@ async function generarLinkPago({ items, referencia, telefono, nombreCliente, dir
 
     // Precargar los datos de facturacion que ya tenemos de la conversacion, para
     // que el cliente no tenga que volver a escribir todo en el checkout de Netpay.
+    //
+    // IMPORTANTE sobre el email: en el ambiente de SANDBOX, Netpay usa el correo
+    // (no la tarjeta) para decidir si la transaccion se acepta, se rechaza o pasa
+    // por 3DS -- ver "Matriz de certificacion Netpay". Por eso aqui se usa
+    // accept@netpay.com.mx mientras seguimos en sandbox, para poder probar pagos
+    // aprobados de verdad. TODO antes de produccion: reemplazar esto por el email
+    // real del cliente (todavia no lo capturamos en la conversacion de WhatsApp).
+    const emailFacturacion = process.env.NETPAY_ENV === "production"
+      ? "cliente@mrsushi.mx" // placeholder hasta que capturemos el email real del cliente
+      : "accept@netpay.com.mx"; // correo de prueba de Netpay para transacciones aceptadas
+
     const billing = {
       firstName,
       lastName,
-      email: "cliente@mrsushi.mx",
+      email: emailFacturacion,
       phone: telefonoLimpio,
       address: {
         street1: direccion || "",
