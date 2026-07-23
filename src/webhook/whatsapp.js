@@ -54,9 +54,15 @@ function esConfirmacion(texto) {
 }
 
 // ── Detecta si el cliente quiere reintentar un pago rechazado ─────────────────
+// Tolerante a errores de tecleo comunes (ej. "reitentar" en vez de "reintentar")
+// -- en vez de exigir la frase exacta, busca "pago" combinado con alguna palabra
+// relacionada a intentar de nuevo.
 function esReintentarPago(texto) {
   const t = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-  return /\b(reintentar pago|reintentar el pago|otra tarjeta|nuevo link|reenviar link|manda(me)? el link|mandar link|volver a pagar|pagar de nuevo|intentar de nuevo el pago)\b/.test(t);
+  if (/\b(otra tarjeta|nuevo link|reenviar link|manda(me)? el link|mandar link|nueva tarjeta)\b/.test(t)) return true;
+  const mencionaPago = /\bpago\b|\bpagar\b/.test(t);
+  const mencionaReintento = t.includes("tent") /* intentar, reintentar, reitentar, etc. */ || /\bde nuevo\b|\botra vez\b/.test(t);
+  return mencionaPago && mencionaReintento;
 }
 
 // ── Detecta si el mensaje pide domicilio ──────────────────────────────────────
