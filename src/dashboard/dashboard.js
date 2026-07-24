@@ -4,7 +4,7 @@ const router = express.Router();
 const path = require("path");
 const logger = require("../utils/logger");
 const db = require("../db/database");
-const { crearSesion, cerrarSesion, requireAuth } = require("./auth");
+const { crearSesion, cerrarSesion, requireAuth, requireGerente, obtenerSesionesActivas } = require("./auth");
 
 // NOTA: Los usuarios y contraseñas ya NO viven aqui hardcodeados.
 // Ahora se administran en la tabla `dashboard_usuarios` de PostgreSQL,
@@ -117,6 +117,16 @@ router.get("/api/stats", requireAuth, async (req, res) => {
     res.json(stats);
   } catch (err) {
     logger.error("Error obteniendo stats: " + err.message);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// Solo el gerente puede ver que sucursales tienen el dashboard abierto ahora mismo.
+router.get("/api/sesiones-activas", requireGerente, (req, res) => {
+  try {
+    res.json(obtenerSesionesActivas());
+  } catch (err) {
+    logger.error("Error obteniendo sesiones activas: " + err.message);
     res.status(500).json({ error: "Error interno" });
   }
 });

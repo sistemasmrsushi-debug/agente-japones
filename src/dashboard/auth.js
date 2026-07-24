@@ -20,7 +20,7 @@ const DURACION_MS = 8 * 60 * 60 * 1000; // 8 horas
 
 function crearSesion({ usuario, rol, sucursal }) {
   const token = crypto.randomBytes(32).toString("hex");
-  SESIONES.set(token, { usuario, rol, sucursal, expira: Date.now() + DURACION_MS });
+  SESIONES.set(token, { usuario, rol, sucursal, expira: Date.now() + DURACION_MS, ultimaActividad: Date.now() });
   return token;
 }
 
@@ -31,11 +31,35 @@ function obtenerSesion(token) {
     SESIONES.delete(token);
     return null;
   }
+  sesion.ultimaActividad = Date.now(); // "heartbeat": cada request valido cuenta como actividad
   return sesion;
 }
 
 function cerrarSesion(token) {
   SESIONES.delete(token);
+}
+
+// Umbral para considerar que alguien "tiene el dashboard abierto ahora mismo".
+// El dashboard consulta datos cada 30s, asi que 60s de margen cubre una consulta
+// perdida sin marcar a alguien como desconectado por error.
+const UMBRAL_EN_LINEA_MS = 60 * 1000;
+
+// Lista quien tiene el dashboard abierto ahora mismo (actividad reciente),
+// para que el gerente pueda ver que sucursales estan conectadas.
+function obtenerSesionesActivas() {
+  const ahora = Date.now();
+  const activas = [];
+  for (const sesion of SESIONES.values()) {
+    if (ahora <= sesion.expira && (ahora - sesion.ultimaActividad) <= UMBRAL_EN_LINEA_MS) {
+      activas.push({
+        usuario: sesion.usuario,
+        rol: sesion.rol,
+        sucursal: sesion.sucursal,
+        ultimaActividad: sesion.ultimaActividad,
+      });
+    }
+  }
+  return activas;
 }
 
 function extraerToken(req) {
@@ -71,4 +95,4 @@ setInterval(() => {
   }
 }, 60 * 60 * 1000).unref();
 
-module.exports = { crearSesion, obtenerSesion, cerrarSesion, requireAuth, requireGerente };
+module.exports = { crearSesion, obtenerSesion, cerrarSesion, requireAuth, requireGerente, obtenerSesionesActivas };
