@@ -30,6 +30,9 @@ async function initDB() {
         codigo_postal TEXT,
         referencias TEXT,
         ubicacion_gps JSONB,
+        uber_delivery_id TEXT,
+        uber_estado TEXT,
+        uber_tracking_url TEXT,
         actualizado TIMESTAMPTZ
       );
     `);
@@ -42,6 +45,11 @@ async function initDB() {
     await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS municipio TEXT;`);
     await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS estado_direccion TEXT;`);
     await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS codigo_postal TEXT;`);
+    // Uber Direct: id de la entrega creada y su estatus mas reciente (para
+    // relacionar los webhooks de seguimiento con el pedido correspondiente).
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS uber_delivery_id TEXT;`);
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS uber_estado TEXT;`);
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS uber_tracking_url TEXT;`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS reservaciones (
         id TEXT PRIMARY KEY,
@@ -162,6 +170,36 @@ async function actualizarEstadoPedido(id, estado) {
   const { rows } = await pool.query(
     "UPDATE pedidos SET estado=$1, actualizado=NOW() WHERE id=$2 RETURNING *",
     [estado, id]
+  );
+  return rows[0] || null;
+}
+
+// Guarda el ID de la entrega creada en Uber Direct para un pedido, junto con el
+// link de seguimiento que se le puede compartir al cliente.
+async function guardarEntregaUber(pedidoId, { deliveryId, trackingUrl, estadoUber }) {
+  const { rows } = await pool.query(
+    "UPDATE pedidos SET uber_delivery_id=$1, uber_tracking_url=$2, uber_estado=$3, actualizado=NOW() WHERE id=$4 RETURNING *",
+    [deliveryId, trackingUrl || null, estadoUber || null, pedidoId]
+  );
+  return rows[0] || null;
+}
+
+// Actualiza solo el estatus de una entrega ya creada (para los webhooks de
+// seguimiento: courier asignado, en camino, entregado, etc.)
+async function actualizarEstadoUber(deliveryId, estadoUber) {
+  const { rows } = await pool.query(
+    "UPDATE pedidos SET uber_estado=$1, actualizado=NOW() WHERE uber_delivery_id=$2 RETURNING *",
+    [estadoUber, deliveryId]
+  );
+  return rows[0] || null;
+}
+
+// Busca el pedido asociado a una entrega de Uber Direct (para relacionar los
+// webhooks de seguimiento con el pedido correspondiente).
+async function obtenerPedidoPorUberDeliveryId(deliveryId) {
+  const { rows } = await pool.query(
+    "SELECT * FROM pedidos WHERE uber_delivery_id = $1 LIMIT 1",
+    [deliveryId]
   );
   return rows[0] || null;
 }
@@ -438,6 +476,9 @@ module.exports = {
   obtenerPedidoPendientePagoPorTelefono,
   actualizarEstadoPedido,
   actualizarGPSPedido,
+  guardarEntregaUber,
+  actualizarEstadoUber,
+  obtenerPedidoPorUberDeliveryId,
   obtenerStatsPedidos,
   guardarReservacion,
   obtenerReservaciones,

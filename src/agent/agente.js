@@ -120,16 +120,17 @@ PROMOCIONES ACTIVAS:
 
 POLÍTICAS: Reservaciones mínimo 2 horas antes, máximo 20 personas. Cancelación sin cargo hasta 1 hora antes.
 FACTURACIÓN: Si el cliente pide factura responde exactamente esto:
-"Para tu factura contáctanos por cualquiera de estos medios:
-📞 Teléfono / WhatsApp: 56 1109 7561
-📧 Correo: facturacion@mrsushi.mx
+"Puedes generar tu factura directamente aquí:
+🧾 https://externo.grupotelnet.com.mx:9308/facturar/
 
-Para agilizar el proceso ten a la mano:
+Ten a la mano:
 • Foto de tu nota o ticket de compra
 • RFC o Constancia de Situación Fiscal
 • Nombre o Razón Social
 • Código Postal fiscal
 • Régimen Fiscal
+
+Si tienes algún problema para generarla ahí, contáctanos por WhatsApp: 56 1109 7561
 
 ¿Hay algo más en que te pueda ayudar?"`;
 }

@@ -7,6 +7,7 @@ const router = express.Router();
 const logger = require("../utils/logger");
 const db = require("../db/database");
 const { consultarEstatusTransaccion } = require("../utils/netpay");
+const { crearEntrega } = require("../utils/uber_direct");
 
 function getTwilioClient() {
   return require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -23,6 +24,67 @@ async function enviarMensaje(telefono, texto) {
     logger.info(`Notificacion de pago enviada a ${telefono}`);
   } catch(error) {
     logger.error("Error enviando notificacion de pago: " + error.message);
+  }
+}
+
+// Arma los datos de recoleccion (la sucursal) y entrega (el domicilio del
+// cliente, ya validado con Google Maps) y crea la entrega en Uber Direct.
+async function despacharUberDirect(pedido) {
+  try {
+    const sucursales = await db.obtenerSucursales();
+    const sucursal = sucursales.find(s => s.nombre === pedido.sucursal);
+
+    if (!sucursal || !sucursal.lat || !sucursal.lng) {
+      logger.warn(`No se pudo despachar Uber Direct para ${pedido.id}: sucursal "${pedido.sucursal}" sin coordenadas registradas. Corre el script de geocodificacion de sucursales.`);
+      return;
+    }
+    if (!pedido.ubicacion_gps?.latitude) {
+      logger.warn(`No se pudo despachar Uber Direct para ${pedido.id}: el pedido no tiene coordenadas de domicilio guardadas.`);
+      return;
+    }
+
+    const pickup = {
+      nombre: sucursal.nombre,
+      calle: sucursal.direccion,
+      telefono: sucursal.telefono,
+      lat: Number(sucursal.lat),
+      lng: Number(sucursal.lng),
+    };
+    const dropoff = {
+      nombre: pedido.nombre_cliente || "Cliente Mr. Sushi",
+      calle: pedido.direccion,
+      ciudad: pedido.municipio,
+      estado: pedido.estado_direccion,
+      codigoPostal: pedido.codigo_postal,
+      telefono: (pedido.telefono_cliente || "").replace("whatsapp:", ""),
+      lat: pedido.ubicacion_gps.latitude,
+      lng: pedido.ubicacion_gps.longitude,
+    };
+
+    const resultado = await crearEntrega({
+      pickup,
+      dropoff,
+      items: pedido.items,
+      referencia: pedido.id,
+    });
+
+    if (resultado.exito) {
+      await db.guardarEntregaUber(pedido.id, {
+        deliveryId: resultado.deliveryId,
+        trackingUrl: resultado.trackingUrl,
+        estadoUber: resultado.estado,
+      });
+      logger.info(`Entrega de Uber Direct creada para ${pedido.id}: deliveryId=${resultado.deliveryId}`);
+      if (pedido.telefono_cliente && resultado.trackingUrl) {
+        await enviarMensaje(pedido.telefono_cliente,
+          `Ya estamos buscando un repartidor para tu pedido. Puedes seguirlo aqui:\n${resultado.trackingUrl}`
+        );
+      }
+    } else {
+      logger.error(`Fallo al crear entrega de Uber Direct para ${pedido.id}: ${resultado.error}`);
+    }
+  } catch (error) {
+    logger.error(`Error inesperado despachando Uber Direct para ${pedido.id}: ${error.message}`);
   }
 }
 
@@ -52,25 +114,43 @@ router.post("/webhook/netpay", async (req, res) => {
           const pedidos = await db.obtenerPedidos(null, "gerente");
           const pedido = pedidos.find(p => p.id === referenciaPedido);
 
-          // Si el pedido ya NO estaba en "pendiente_pago", este webhook de pago
-          // exitoso llego para un pedido que ya se habia marcado como pagado antes
-          // (ej. alguien pago dos veces con el link viejo y uno nuevo). No lo
-          // volvemos a procesar como si fuera la primera vez -- eso evitaria
-          // mandarle al cliente un segundo "pago confirmado" confuso -- pero se
-          // deja un WARN bien visible, porque esto podria ser un cobro doble real
-          // que requiera reembolso manual por parte del restaurante.
-          if (pedido && pedido.estado !== "pendiente_pago") {
+          // IMPORTANTE (confirmado con Netpay): el link de pago no expira nunca
+          // de su lado, aunque nuestro sistema ya haya cancelado el pedido
+          // internamente a los 15 min. Por eso hay que distinguir dos casos
+          // distintos, no tratarlos igual:
+          //
+          // 1. El pedido esta "cancelado" -> el cliente pago TARDE, pero sigue
+          //    siendo un pago real y unico. Se debe honrar (avisar, preparar,
+          //    despachar) igual que un pago a tiempo, solo que se deja anotado
+          //    que fue tardio para que el gerente lo sepa.
+          //
+          // 2. El pedido ya estaba "pendiente" (o mas adelante: en_proceso,
+          //    listo) -> esto SI es un pago duplicado real (dos confirmaciones
+          //    de pago para el mismo pedido), y no se debe volver a procesar.
+          const yaEstabaPagado = pedido && ["pendiente", "en_proceso", "listo"].includes(pedido.estado);
+
+          if (yaEstabaPagado) {
             logger.warn(`POSIBLE PAGO DUPLICADO: el pedido ${referenciaPedido} ya estaba en estado "${pedido.estado}" cuando llego OTRO webhook de pago exitoso (transactionId=${transactionId}, monto=${amount}). Revisar manualmente si hubo un cobro doble y si procede un reembolso.`);
             break;
           }
 
-          await db.actualizarEstadoPedido(referenciaPedido, "pendiente"); // pasa de pendiente_pago a pendiente (confirmado, listo para preparar)
+          if (pedido && pedido.estado === "cancelado") {
+            logger.warn(`Pago TARDIO recibido para el pedido ${referenciaPedido} (ya se habia cancelado internamente por pasar los 15 min, pero el link de Netpay seguia activo). Se honra el pago igualmente.`);
+          }
+
+          await db.actualizarEstadoPedido(referenciaPedido, "pendiente"); // pasa de pendiente_pago (o cancelado) a pendiente (confirmado, listo para preparar)
           logger.info(`Pedido ${referenciaPedido} marcado como pagado`);
 
           if (pedido?.telefono_cliente) {
             await enviarMensaje(pedido.telefono_cliente,
               `Pago confirmado! Tu pedido ${referenciaPedido} esta siendo preparado.\nTarjeta terminacion ${lastFourDigits || "****"}.\nTiempo estimado: 40 minutos.`
             );
+          }
+
+          // Despachar repartidor de Uber Direct automaticamente, solo para
+          // pedidos a domicilio (los de recoger en sucursal no aplican).
+          if (pedido?.tipo === "domicilio") {
+            await despacharUberDirect(pedido);
           }
         }
         break;

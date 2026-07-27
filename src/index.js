@@ -5,7 +5,13 @@ const path = require("path");
 const rateLimit = require("express-rate-limit");
 const app = express();
 
-app.use(express.json());
+// La opcion "verify" guarda el cuerpo crudo en req.rawBody antes de parsearlo.
+// Se necesita para verificar la firma HMAC del webhook de Uber Direct (que
+// exige los bytes originales, no el objeto ya parseado) sin dejar de usar
+// express.json() de forma global para el resto de rutas.
+app.use(express.json({
+  verify: (req, res, buf) => { req.rawBody = buf; },
+}));
 app.use(express.urlencoded({ extended: true }));
 
 // Necesario para Railway - confiar en el proxy para rate limiting correcto
@@ -20,6 +26,7 @@ const llamadasRouter = require("./llamadas/llamadas");
 const dashboardRouter = require("./dashboard/dashboard");
 const webhookNetpayRouter = require("./webhook/webhook_netpay");
 const pagoPaginasRouter = require("./webhook/pago_paginas");
+const webhookUberRouter = require("./webhook/webhook_uber");
 const { initDB } = require("./db/database");
 
 // ── RATE LIMITING ─────────────────────────────────────────────────────────────
@@ -69,6 +76,7 @@ app.use("/", llamadasRouter);
 app.use("/", dashboardRouter);
 app.use("/", webhookNetpayRouter);
 app.use("/", pagoPaginasRouter);
+app.use("/", webhookUberRouter);
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString(), app: "Agente Mr. Sushi Call Center" });
