@@ -84,6 +84,19 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString(), app: "Agente Mr. Sushi Call Center" });
 });
 
+// ── MANEJADOR GLOBAL DE ERRORES ──────────────────────────────────────────────
+// Sin esto, cualquier error que truene ANTES de llegar a la logica de cada ruta
+// (ej. dentro de un middleware como el rate limiter, o al parsear el body) se
+// pierde por completo: Express responde 500 por su cuenta, sin que quede
+// registrado en nuestros logs -- por eso no hemos podido ver que es lo que
+// realmente falla con los webhooks de Netpay. Debe ir DESPUES de montar todas
+// las rutas y routers.
+app.use((err, req, res, next) => {
+  logger.error(`Error no manejado en ${req.method} ${req.originalUrl}: ${err.message}\n${err.stack}`);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ error: "Error interno del servidor" });
+});
+
 const PORT = process.env.PORT || 8080;
 
 async function iniciar() {
