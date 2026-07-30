@@ -681,16 +681,18 @@ async function cargarAdminSucursales() {
 
 function renderAdminSucursales(sucursales) {
   const tbody = document.getElementById('tbody-admin-sucursales');
+  const soloDigitos = `this.value=this.value.replace(/\\D/g,'').slice(0,10)`;
   tbody.innerHTML = sucursales.length ? sucursales.map(s => `
     <tr data-id="${s.id}">
       <td style="font-weight:600">${s.nombre}</td>
       <td class="celda-input"><input class="admin-input-edit" value="${(s.direccion||'').replace(/"/g,'&quot;')}" data-campo="direccion"></td>
-      <td class="celda-input"><input class="admin-input-edit" value="${s.telefono||''}" data-campo="telefono"></td>
-      <td class="celda-input"><input class="admin-input-edit" value="${s.telefono_transferencia||''}" data-campo="telefono_transferencia"></td>
-      <td class="celda-input"><input class="admin-input-edit" value="${s.whatsapp||''}" data-campo="whatsapp"></td>
-      <td class="celda-input" style="display:flex;gap:0.2rem">
-        <input class="admin-input-edit" style="width:70px" placeholder="Abre" value="${s.horario_apertura||''}" data-campo="horario_apertura">
-        <input class="admin-input-edit" style="width:70px" placeholder="Cierra" value="${s.horario_cierre||''}" data-campo="horario_cierre">
+      <td class="celda-input"><input class="admin-input-edit" type="tel" inputmode="numeric" maxlength="10" placeholder="10 dígitos" oninput="${soloDigitos}" value="${s.telefono||''}" data-campo="telefono"></td>
+      <td class="celda-input"><input class="admin-input-edit" type="tel" inputmode="numeric" maxlength="10" placeholder="10 dígitos" oninput="${soloDigitos}" value="${s.telefono_transferencia||''}" data-campo="telefono_transferencia"></td>
+      <td class="celda-input"><input class="admin-input-edit" type="tel" inputmode="numeric" maxlength="10" placeholder="10 dígitos" oninput="${soloDigitos}" value="${s.whatsapp||''}" data-campo="whatsapp"></td>
+      <td class="celda-input" style="display:flex;gap:0.3rem;align-items:center">
+        <input class="admin-input-edit" type="time" style="width:110px" value="${s.horario_apertura||''}" data-campo="horario_apertura">
+        <span style="color:var(--muted);font-size:0.65rem">a</span>
+        <input class="admin-input-edit" type="time" style="width:110px" value="${s.horario_cierre||''}" data-campo="horario_cierre">
       </td>
       <td><button class="btn-accion azul" onclick="guardarSucursal(${s.id}, this)">Guardar</button></td>
     </tr>`).join('') : '<tr><td colspan="7" class="vacio">Sin sucursales registradas.</td></tr>';
@@ -700,6 +702,15 @@ async function guardarSucursal(id, btn) {
   const fila = btn.closest('tr');
   const campos = {};
   fila.querySelectorAll('[data-campo]').forEach(inp => campos[inp.dataset.campo] = inp.value);
+
+  // Validar telefonos: si se escribio algo, debe ser exactamente 10 digitos
+  for (const campo of ['telefono', 'telefono_transferencia', 'whatsapp']) {
+    const valor = campos[campo];
+    if (valor && valor.length !== 10) {
+      return mostrarMsg('as-msg', `El campo de teléfono (${campo.replace('_',' ')}) debe tener exactamente 10 dígitos.`, false);
+    }
+  }
+
   try {
     const r = await fetchAuth(`/api/admin/sucursales/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(campos) });
     const data = await r.json();
