@@ -253,12 +253,20 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       estado = null;
     }
 
-    if (estado?.fase === "esperando_confirmacion_sucursal" && esConfirmacion(mensaje)) {
+    // Ademas de las palabras de confirmacion (si/ok/claro/etc.), si el cliente
+    // menciona directamente el nombre de una sucursal real ("la de Lomas Verdes",
+    // "esa esta bien Hahha Azul") eso tambien cuenta como confirmacion -- no
+    // depender solo de esConfirmacion() evita que el mensaje se caiga al flujo
+    // generico de IA, que puede responder con texto que promete una accion
+    // ("Un momento, busco...") sin ejecutar ninguna logica real detras.
+    const restauranteParaConfirmar = require("../../config/restaurante");
+    const sucursalMencionadaEnConfirmacion = restauranteParaConfirmar.sucursales.find(s =>
+      mensaje.toLowerCase().includes(s.nombre.toLowerCase())
+    );
+
+    if (estado?.fase === "esperando_confirmacion_sucursal" && (esConfirmacion(mensaje) || sucursalMencionadaEnConfirmacion)) {
       // Verificar si el cliente eligio una sucursal diferente
-      const restaurante = require("../../config/restaurante");
-      const sucursalElegida = restaurante.sucursales.find(s =>
-        mensaje.toLowerCase().includes(s.nombre.toLowerCase())
-      );
+      const sucursalElegida = sucursalMencionadaEnConfirmacion;
       if (sucursalElegida) {
         estado.sucursal_sugerida = sucursalElegida.nombre;
         logger.info(`Cliente eligio sucursal diferente: ${sucursalElegida.nombre}`);
