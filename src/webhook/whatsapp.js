@@ -253,20 +253,12 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       estado = null;
     }
 
-    // Ademas de las palabras de confirmacion (si/ok/claro/etc.), si el cliente
-    // menciona directamente el nombre de una sucursal real ("la de Lomas Verdes",
-    // "esa esta bien Hahha Azul") eso tambien cuenta como confirmacion -- no
-    // depender solo de esConfirmacion() evita que el mensaje se caiga al flujo
-    // generico de IA, que puede responder con texto que promete una accion
-    // ("Un momento, busco...") sin ejecutar ninguna logica real detras.
-    const restauranteParaConfirmar = require("../../config/restaurante");
-    const sucursalMencionadaEnConfirmacion = restauranteParaConfirmar.sucursales.find(s =>
-      mensaje.toLowerCase().includes(s.nombre.toLowerCase())
-    );
-
-    if (estado?.fase === "esperando_confirmacion_sucursal" && (esConfirmacion(mensaje) || sucursalMencionadaEnConfirmacion)) {
+    if (estado?.fase === "esperando_confirmacion_sucursal" && esConfirmacion(mensaje)) {
       // Verificar si el cliente eligio una sucursal diferente
-      const sucursalElegida = sucursalMencionadaEnConfirmacion;
+      const restaurante = require("../../config/restaurante");
+      const sucursalElegida = restaurante.sucursales.find(s =>
+        mensaje.toLowerCase().includes(s.nombre.toLowerCase())
+      );
       if (sucursalElegida) {
         estado.sucursal_sugerida = sucursalElegida.nombre;
         logger.info(`Cliente eligio sucursal diferente: ${sucursalElegida.nombre}`);
@@ -563,6 +555,86 @@ async function ejecutarAccion(accion, datos, telefono) {
         const real = buscarPlatillo(i.nombre);
         return real ? { nombre: real.nombre, precio: real.precio, cantidad: i.cantidad || 1 } : i;
       });
+
+      // ── DOMICILIO: SIEMPRE debe pasar por pago, sin importar por cual de
+      // los dos caminos (maquina de estados o esta etiqueta de la IA) llegue
+      // la conversacion. Antes, este camino registraba el pedido como
+      // "pendiente" directo, sin pago -- un cliente podia recibir su pedido
+      // a domicilio gratis si la conversacion se salia del guion esperado.
+      if (datos.pedido?.tipo === "domicilio") {
+        const direccionCliente = datos.pedido?.direccion || "";
+        const geoResult = await validarDireccion(direccionCliente);
+
+        if (!geoResult.valida) {
+          await enviarMensaje(telefono,
+            `No pudimos confirmar tu direccion (${direccionCliente}). Por favor verifica e intenta de nuevo con calle, numero, colonia y municipio.`
+          );
+          return;
+        }
+
+        const zonaSugerida = datos.pedido?.sucursal || detectarSucursalPorZona(geoResult.direccion);
+        const resolucion = await resolverSucursalPorDistancia(zonaSugerida, geoResult.coords);
+
+        if (!resolucion.dentroDeRadio) {
+          await enviarMensaje(telefono,
+            `Tu direccion (${geoResult.direccion}) queda fuera de nuestra zona de entrega a domicilio (radio de ${RADIO_ENTREGA_KM} km de cualquiera de nuestras sucursales). ¿Prefieres recoger tu pedido en alguna sucursal?`
+          );
+          return;
+        }
+
+        const pedido = {
+          id: `PED-${Date.now()}`,
+          fecha: new Date().toISOString(),
+          estado: "pendiente_pago",
+          telefono_cliente: telefono,
+          nombre_cliente: datos.pedido?.nombre_cliente || null,
+          sucursal: resolucion.sucursal,
+          items,
+          tipo: "domicilio",
+          direccion: geoResult.direccion,
+          colonia: geoResult.colonia || null,
+          municipio: geoResult.municipio || null,
+          estado_direccion: geoResult.estado || null,
+          codigo_postal: geoResult.codigoPostal || null,
+          referencias: datos.pedido?.referencias || null,
+          ubicacion_gps: geoResult.coords ? {
+            latitude: geoResult.coords.lat,
+            longitude: geoResult.coords.lng,
+            maps_url: geoResult.maps_url || null,
+          } : null,
+        };
+        await db.guardarPedido(pedido);
+        logger.info(`Pedido pre-registrado (pendiente de pago, via IA): ${pedido.id} -> ${pedido.sucursal}`);
+
+        const totalDomicilio = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
+        const itemsTextoDomicilio = items.map(i => `${i.cantidad || 1}x ${i.nombre} ($${i.precio})`).join("\n");
+
+        const resultadoPago = await generarLinkPago({
+          items,
+          referencia: pedido.id,
+          telefono,
+          nombreCliente: pedido.nombre_cliente,
+          direccion: pedido.direccion,
+          colonia: pedido.colonia,
+          municipio: pedido.municipio,
+          estadoDireccion: pedido.estado_direccion,
+          codigoPostal: pedido.codigo_postal,
+        });
+
+        if (resultadoPago.exito) {
+          await enviarMensaje(telefono,
+            `Tu pedido esta listo para confirmar!\n\nID: ${pedido.id}\n\n${itemsTextoDomicilio}\n\nTotal: $${totalDomicilio}\nSucursal: ${pedido.sucursal}\nDireccion: ${pedido.direccion}\n\nPara confirmar tu pedido realiza tu pago aqui:\n${resultadoPago.linkPago}\n\nTienes 15 minutos para completar el pago.`
+          );
+        } else {
+          await enviarMensaje(telefono,
+            `Tu pedido fue registrado (ID: ${pedido.id}) pero tuvimos un problema generando el link de pago. Te contactaremos en breve para confirmar el pago.`
+          );
+          logger.error(`Fallo generacion de link de pago (via IA) para ${pedido.id}: ${resultadoPago.error}`);
+        }
+        return;
+      }
+
+      // ── SUCURSAL (recoger): se paga en persona, no exige link de pago.
       const pedido = {
         id: `PED-${Date.now()}`,
         fecha: new Date().toISOString(),
@@ -571,10 +643,10 @@ async function ejecutarAccion(accion, datos, telefono) {
         nombre_cliente: datos.pedido?.nombre_cliente || null,
         sucursal: datos.pedido?.sucursal || "Por confirmar",
         items,
-        tipo: datos.pedido?.tipo || "sucursal",
-        direccion: datos.pedido?.direccion || null,
-        colonia: datos.pedido?.colonia || null,
-        referencias: datos.pedido?.referencias || null,
+        tipo: "sucursal",
+        direccion: null,
+        colonia: null,
+        referencias: null,
         ubicacion_gps: null,
       };
       await db.guardarPedido(pedido);
@@ -582,13 +654,8 @@ async function ejecutarAccion(accion, datos, telefono) {
       const total = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
       const itemsTexto = items.map(i => `${i.cantidad || 1}x ${i.nombre} ($${i.precio})`).join("\n");
       await enviarMensaje(telefono,
-        `Pedido registrado!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\nTotal: $${total}\nSucursal: ${pedido.sucursal}\n\nTiempo: ~40 min.${pedido.tipo === "domicilio" ? " Envio GRATIS!" : ""}`
+        `Pedido registrado!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\nTotal: $${total}\nSucursal: ${pedido.sucursal}\n\nTiempo: ~40 min.`
       );
-      if (pedido.tipo === "domicilio") {
-        setTimeout(async () => {
-          await enviarMensaje(telefono, "Opcional: comparte tu ubicacion GPS para que lleguen exactamente a tu puerta. Clip -> Ubicacion -> Enviar mi ubicacion actual.");
-        }, 3000);
-      }
     } else if (accion === "REGISTRAR_RESERVACION") {
       const reservacion = {
         id: `RES-${Date.now()}`,
