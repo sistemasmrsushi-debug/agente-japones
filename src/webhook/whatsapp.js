@@ -253,13 +253,33 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       estado = null;
     }
 
-    if (estado?.fase === "esperando_confirmacion_sucursal" && esConfirmacion(mensaje)) {
-      // Verificar si el cliente eligio una sucursal diferente
+    // Detecta si el mensaje nombra una sucursal especifica, sin importar si
+    // tambien usa una palabra de confirmacion tipica (si/dale/ok).
+    function sucursalNombradaEnMensaje(texto) {
       const restaurante = require("../../config/restaurante");
-      const sucursalElegida = restaurante.sucursales.find(s =>
-        mensaje.toLowerCase().includes(s.nombre.toLowerCase())
-      );
+      return restaurante.sucursales.find(s => texto.toLowerCase().includes(s.nombre.toLowerCase())) || null;
+    }
+
+    if (estado?.fase === "esperando_confirmacion_sucursal" && (esConfirmacion(mensaje) || sucursalNombradaEnMensaje(mensaje))) {
+      // Verificar si el cliente eligio una sucursal diferente a la sugerida
+      const sucursalElegida = sucursalNombradaEnMensaje(mensaje);
       if (sucursalElegida) {
+        // Si el cliente nombro una sucursal especifica, validar que SI quede
+        // dentro del radio de entrega -- antes se aceptaba sin verificar,
+        // lo cual permitia pedir una sucursal fuera de rango sin restriccion.
+        if (estado.coords) {
+          const sucursalesDB = await db.obtenerSucursales();
+          const sucursalDB = sucursalesDB.find(s => s.nombre === sucursalElegida.nombre);
+          if (sucursalDB?.lat && sucursalDB?.lng) {
+            const distancia = calcularDistanciaKm(estado.coords.lat, estado.coords.lng, Number(sucursalDB.lat), Number(sucursalDB.lng));
+            if (distancia > RADIO_ENTREGA_KM) {
+              await enviarMensaje(telefono,
+                `La sucursal ${sucursalElegida.nombre} queda a ${distancia.toFixed(1)} km de tu domicilio, fuera de nuestro rango de entrega (${RADIO_ENTREGA_KM} km). ¿Prefieres que te enviemos desde *${estado.sucursal_sugerida}*, o prefieres recoger tu pedido en ${sucursalElegida.nombre}?`
+              );
+              return;
+            }
+          }
+        }
         estado.sucursal_sugerida = sucursalElegida.nombre;
         logger.info(`Cliente eligio sucursal diferente: ${sucursalElegida.nombre}`);
       }
