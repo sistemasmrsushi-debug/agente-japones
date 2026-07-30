@@ -3,6 +3,7 @@
 // Conexion PostgreSQL — reemplaza archivos JSON
 // =============================================
 const { Pool } = require("pg");
+const bcrypt = require("bcryptjs");
 const logger = require("../utils/logger");
 
 const pool = new Pool({
@@ -412,17 +413,19 @@ async function obtenerUsuarioDashboardPorUsuario(usuario) {
 }
 
 async function crearUsuarioDashboard({ usuario, password, sucursal, rol }) {
+  const hash = await bcrypt.hash(password, 10);
   const { rows } = await pool.query(`
     INSERT INTO dashboard_usuarios (usuario, password, sucursal, rol)
     VALUES ($1,$2,$3,$4) RETURNING usuario, sucursal, rol, actualizado
-  `, [usuario.toLowerCase(), password, sucursal || null, rol || "sucursal"]);
+  `, [usuario.toLowerCase(), hash, sucursal || null, rol || "sucursal"]);
   return rows[0];
 }
 
 async function actualizarPasswordUsuarioDashboard(usuario, password) {
+  const hash = await bcrypt.hash(password, 10);
   const { rows } = await pool.query(
     "UPDATE dashboard_usuarios SET password = $1, actualizado = NOW() WHERE usuario = $2 RETURNING usuario, sucursal, rol, actualizado",
-    [password, usuario.toLowerCase()]
+    [hash, usuario.toLowerCase()]
   );
   return rows[0] || null;
 }
@@ -432,11 +435,12 @@ async function eliminarUsuarioDashboard(usuario) {
 }
 
 async function insertarUsuarioDashboardSiNoExiste(u) {
+  const hash = await bcrypt.hash(u.password, 10);
   await pool.query(`
     INSERT INTO dashboard_usuarios (usuario, password, sucursal, rol)
     VALUES ($1,$2,$3,$4)
     ON CONFLICT (usuario) DO NOTHING
-  `, [u.usuario.toLowerCase(), u.password, u.sucursal || null, u.rol || "sucursal"]);
+  `, [u.usuario.toLowerCase(), hash, u.sucursal || null, u.rol || "sucursal"]);
 }
 
 // ── ENSAMBLADOR: config completa (para uso futuro del agente de IA) ────────

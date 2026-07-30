@@ -2,6 +2,7 @@
 const express = require("express");
 const router = express.Router();
 const path = require("path");
+const bcrypt = require("bcryptjs");
 const logger = require("../utils/logger");
 const db = require("../db/database");
 const { crearSesion, cerrarSesion, requireAuth, requireGerente, obtenerSesionesActivas } = require("./auth");
@@ -44,7 +45,9 @@ router.post("/api/login", async (req, res) => {
     const { usuario, password } = req.body;
     if (!usuario || !password) return res.status(400).json({ error: "Falta usuario o contrasena" });
     const user = await db.obtenerUsuarioDashboardPorUsuario(usuario);
-    if (!user || user.password !== password)
+    // Comparacion segura con bcrypt (nunca comparar contrasenas en texto plano).
+    const coincide = user && await bcrypt.compare(password, user.password);
+    if (!coincide)
       return res.status(401).json({ error: "Usuario o contrasena incorrectos" });
     const token = crearSesion({ usuario: user.usuario, rol: user.rol, sucursal: user.sucursal });
     res.json({ ok: true, token, rol: user.rol, sucursal: user.sucursal, usuario: user.usuario });
