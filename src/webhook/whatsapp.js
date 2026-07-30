@@ -253,29 +253,54 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       estado = null;
     }
 
-    // Detecta si el mensaje nombra una sucursal especifica, sin importar si
-    // tambien usa una palabra de confirmacion tipica (si/dale/ok).
-    // No exige el nombre completo exacto -- clientes reales escriben solo una
-    // palabra del nombre (ej. "de Hahha" en vez de "de Hahha Azul"), y antes
-    // eso no se reconocia, cayendo al flujo generico de IA sin ninguna accion
-    // real detras (mismo patron de bug ya visto).
-    function sucursalNombradaEnMensaje(texto) {
-      const restaurante = require("../../config/restaurante");
-      const t = texto.toLowerCase();
-      return restaurante.sucursales.find(s => {
-        const nombreLower = s.nombre.toLowerCase();
-        if (t.includes(nombreLower)) return true;
-        // Coincidencia parcial: al menos una palabra especifica (4+ caracteres,
-        // para evitar falsos positivos con palabras cortas/genericas) del
-        // nombre de la sucursal aparece en el mensaje.
-        const palabrasClave = nombreLower.split(/\s+/).filter(p => p.length >= 4);
-        return palabrasClave.some(p => t.includes(p));
-      }) || null;
+    // Quita acentos para comparar -- muchos clientes escriben "satelite" o
+    // "galerias" sin tilde, y antes eso no hacia match con "Satélite"/"Galerías"
+    // tal como estan guardados en config/restaurante.js.
+    function normalizarTexto(s) {
+      return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     }
 
-    if (estado?.fase === "esperando_confirmacion_sucursal" && (esConfirmacion(mensaje) || sucursalNombradaEnMensaje(mensaje))) {
+    // Detecta si el mensaje nombra una sucursal especifica, sin importar si
+    // tambien usa una palabra de confirmacion tipica (si/dale/ok). No exige el
+    // nombre completo exacto -- clientes reales escriben solo una palabra del
+    // nombre (ej. "de Hahha" en vez de "de Hahha Azul").
+    //
+    // Devuelve: la sucursal si hay una sola coincidencia clara, null si no hay
+    // ninguna, o {ambiguo:true, opciones:[...]} si el mensaje podria referirse
+    // a mas de una sucursal (ej. "Hahha" coincide con Hahha Azul Y Hahha
+    // Esmeralda; "Galerias" coincide con 3 sucursales distintas) -- en ese caso
+    // NO hay que adivinar cual quiso decir, hay que preguntarle.
+    function sucursalNombradaEnMensaje(texto) {
+      const restaurante = require("../../config/restaurante");
+      const t = normalizarTexto(texto);
+
+      const coincidenciaExacta = restaurante.sucursales.find(s => t.includes(normalizarTexto(s.nombre)));
+      if (coincidenciaExacta) return coincidenciaExacta;
+
+      const candidatas = restaurante.sucursales.filter(s => {
+        const palabrasClave = normalizarTexto(s.nombre).split(/\s+/).filter(p => p.length >= 4);
+        return palabrasClave.some(p => t.includes(p));
+      });
+
+      if (candidatas.length === 1) return candidatas[0];
+      if (candidatas.length > 1) return { ambiguo: true, opciones: candidatas };
+      return null;
+    }
+
+    const sucursalDetectadaEnMensaje = sucursalNombradaEnMensaje(mensaje);
+
+    // Mensaje ambiguo (coincide con varias sucursales por palabra clave) --
+    // preguntar cual quiso decir, en vez de elegir una al azar.
+    if (estado?.fase === "esperando_confirmacion_sucursal" && sucursalDetectadaEnMensaje?.ambiguo) {
+      await enviarMensaje(telefono,
+        `¿Cuál de estas sucursales prefieres? ${sucursalDetectadaEnMensaje.opciones.map(s => s.nombre).join(", ")}`
+      );
+      return;
+    }
+
+    if (estado?.fase === "esperando_confirmacion_sucursal" && (esConfirmacion(mensaje) || sucursalDetectadaEnMensaje)) {
       // Verificar si el cliente eligio una sucursal diferente a la sugerida
-      const sucursalElegida = sucursalNombradaEnMensaje(mensaje);
+      const sucursalElegida = sucursalDetectadaEnMensaje;
       if (sucursalElegida) {
         // Si el cliente nombro una sucursal especifica, validar que SI quede
         // dentro del radio de entrega -- antes se aceptaba sin verificar,
