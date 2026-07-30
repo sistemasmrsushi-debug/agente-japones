@@ -255,9 +255,22 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
 
     // Detecta si el mensaje nombra una sucursal especifica, sin importar si
     // tambien usa una palabra de confirmacion tipica (si/dale/ok).
+    // No exige el nombre completo exacto -- clientes reales escriben solo una
+    // palabra del nombre (ej. "de Hahha" en vez de "de Hahha Azul"), y antes
+    // eso no se reconocia, cayendo al flujo generico de IA sin ninguna accion
+    // real detras (mismo patron de bug ya visto).
     function sucursalNombradaEnMensaje(texto) {
       const restaurante = require("../../config/restaurante");
-      return restaurante.sucursales.find(s => texto.toLowerCase().includes(s.nombre.toLowerCase())) || null;
+      const t = texto.toLowerCase();
+      return restaurante.sucursales.find(s => {
+        const nombreLower = s.nombre.toLowerCase();
+        if (t.includes(nombreLower)) return true;
+        // Coincidencia parcial: al menos una palabra especifica (4+ caracteres,
+        // para evitar falsos positivos con palabras cortas/genericas) del
+        // nombre de la sucursal aparece en el mensaje.
+        const palabrasClave = nombreLower.split(/\s+/).filter(p => p.length >= 4);
+        return palabrasClave.some(p => t.includes(p));
+      }) || null;
     }
 
     if (estado?.fase === "esperando_confirmacion_sucursal" && (esConfirmacion(mensaje) || sucursalNombradaEnMensaje(mensaje))) {
