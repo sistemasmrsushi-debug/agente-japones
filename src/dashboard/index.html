@@ -106,6 +106,9 @@ tr:hover td{background:var(--gris1)}
 .btn-guardar{background:var(--turquesa);color:var(--blanco);border:none;padding:0.55rem 1.1rem;font-family:'Inter',sans-serif;font-size:0.65rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;transition:background 0.2s;white-space:nowrap}
 .btn-guardar:hover{background:var(--turquesa-h)}
 .admin-msg{font-size:0.7rem;margin-bottom:0.6rem;min-height:0.9rem}
+.guardar-masivo-wrap{display:flex;align-items:center;justify-content:space-between;background:var(--gris1);border:1px solid var(--turquesa);padding:0.6rem 0.9rem;margin-bottom:0.8rem;font-size:0.72rem;color:var(--turquesa)}
+tr.fila-modificada td:first-child{border-left:3px solid var(--naranja)}
+tr.fila-modificada{background:rgba(212,134,10,0.08)}
 .admin-msg.ok{color:var(--verde)}
 .admin-msg.err{color:var(--rojo)}
 .celda-input{padding:0.4rem !important}
@@ -214,6 +217,10 @@ tr:hover td{background:var(--gris1)}
           <button class="btn-guardar" onclick="agregarItemMenu()">+ Agregar</button>
         </div>
         <div class="admin-msg" id="am-msg"></div>
+        <div class="guardar-masivo-wrap" id="guardar-masivo-wrap" style="display:none">
+          <span id="guardar-masivo-contador">0 cambios sin guardar</span>
+          <button class="btn-guardar" onclick="guardarCambiosMenu()">Guardar cambios</button>
+        </div>
         <div class="tabla-wrap">
           <table>
             <thead><tr><th>Categoría</th><th>Nombre</th><th>Precio</th><th>Descripción</th><th>Acciones</th></tr></thead>
@@ -610,14 +617,57 @@ async function cargarAdminMenu() {
   } catch { mostrarMsg('am-msg', 'Error cargando el menú.', false); }
 }
 
+let filasMenuModificadas = new Set();
+
+function marcarFilaModificada(input) {
+  const fila = input.closest('tr');
+  fila.classList.add('fila-modificada');
+  filasMenuModificadas.add(fila.dataset.id);
+  actualizarContadorMasivo();
+}
+
+function actualizarContadorMasivo() {
+  const wrap = document.getElementById('guardar-masivo-wrap');
+  const contador = document.getElementById('guardar-masivo-contador');
+  const n = filasMenuModificadas.size;
+  wrap.style.display = n > 0 ? 'flex' : 'none';
+  contador.textContent = `${n} cambio${n===1?'':'s'} sin guardar`;
+}
+
+async function guardarCambiosMenu() {
+  const ids = [...filasMenuModificadas];
+  let exitosos = 0, fallidos = 0;
+  for (const id of ids) {
+    const fila = document.querySelector(`#tbody-admin-menu tr[data-id="${id}"]`);
+    if (!fila) { filasMenuModificadas.delete(id); continue; }
+    const campos = {};
+    fila.querySelectorAll('[data-campo]').forEach(inp => campos[inp.dataset.campo] = inp.value);
+    campos.precio = Number(campos.precio);
+    if (isNaN(campos.precio) || campos.precio < 0) { fallidos++; continue; }
+    try {
+      const r = await fetchAuth(`/api/admin/menu/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(campos) });
+      if (r.ok) {
+        fila.classList.remove('fila-modificada');
+        filasMenuModificadas.delete(id);
+        exitosos++;
+      } else fallidos++;
+    } catch { fallidos++; }
+  }
+  actualizarContadorMasivo();
+  if (fallidos === 0) mostrarMsg('am-msg', `${exitosos} platillo${exitosos===1?'':'s'} actualizado${exitosos===1?'':'s'} correctamente.`, true);
+  else mostrarMsg('am-msg', `${exitosos} guardado(s), ${fallidos} con error (revisa que el precio sea válido).`, false);
+}
+
 function renderAdminMenu(items) {
+  filasMenuModificadas.clear();
+  actualizarContadorMasivo();
   const tbody = document.getElementById('tbody-admin-menu');
   tbody.innerHTML = items.length ? items.map(i => `
     <tr data-id="${i.id}">
-      <td class="celda-input"><input class="admin-input-edit" value="${i.categoria}" data-campo="categoria"></td>
-      <td class="celda-input"><input class="admin-input-edit" value="${(i.nombre||'').replace(/"/g,'&quot;')}" data-campo="nombre"></td>
-      <td class="celda-input" style="max-width:100px"><input class="admin-input-edit" type="number" step="0.01" min="0" value="${i.precio}" data-campo="precio"></td>
-      <td class="celda-input"><input class="admin-input-edit" value="${(i.descripcion||'').replace(/"/g,'&quot;')}" data-campo="descripcion"></td>
+      <td class="celda-input"><input class="admin-input-edit" value="${i.categoria}" data-campo="categoria" oninput="marcarFilaModificada(this)"></td>
+      <td class="celda-input"><input class="admin-input-edit" value="${(i.nombre||'').replace(/"/g,'&quot;')}" data-campo="nombre" oninput="marcarFilaModificada(this)"></td>
+      <td class="celda-input" style="max-width:100px"><input class="admin-input-edit" type="number" step="0.01" min="0" value="${i.precio}" data-campo="precio" oninput="marcarFilaModificada(this)"></td>
+      <td class="celda-input"><input class="admin-input-edit" value="${(i.descripcion||'').replace(/"/g,'&quot;')}" data-campo="descripcion" oninput="marcarFilaModificada(this)"></td>
       <td>
         <div class="acciones">
           <button class="btn-accion azul" onclick="guardarItemMenu(${i.id}, this)">Guardar</button>
@@ -637,8 +687,12 @@ async function guardarItemMenu(id, btn) {
     const r = await fetchAuth(`/api/admin/menu/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(campos) });
     const data = await r.json();
     if (!r.ok) return mostrarMsg('am-msg', data.error || 'Error al guardar.', false);
+    fila.classList.remove('fila-modificada');
+    filasMenuModificadas.delete(String(id));
+    actualizarContadorMasivo();
     mostrarMsg('am-msg', `"${campos.nombre}" actualizado.`, true);
-    cargarAdminMenu();
+    // Nota: ya NO se recarga toda la tabla aqui -- eso borraria cambios sin
+    // guardar que el usuario pudiera tener en otras filas al mismo tiempo.
   } catch { mostrarMsg('am-msg', 'Error de conexión.', false); }
 }
 
