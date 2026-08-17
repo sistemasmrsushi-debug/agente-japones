@@ -3,6 +3,25 @@
 
 const logger = require("./logger");
 
+// En muchos fraccionamientos mexicanos, un mismo nombre base se repite en
+// varias "etapas" o "secciones" numeradas (ej. "Alteña I", "Alteña II",
+// "Alteña III") que son desarrollos FISICAMENTE DISTINTOS, aunque compartan
+// el mismo esquema de numeracion de calle. Si el cliente menciono un numero
+// de etapa y Google devolvio uno diferente, es una señal fuerte de que
+// cambio la ubicacion real, no solo el nombre -- aunque el numero de calle
+// coincida.
+function extraerNumeroEtapa(texto) {
+  const romanosANumero = { i: 1, ii: 2, iii: 3, iv: 4, v: 5 };
+  const coincidencias = texto.match(/\b(i{1,3}|iv|v)\b|\b\d\b/gi);
+  if (!coincidencias || !coincidencias.length) return null;
+  // Toma la ultima coincidencia (normalmente el numero de etapa va al final,
+  // ej. "...Alteña II", "...Seccion 3")
+  const ultima = coincidencias[coincidencias.length - 1].toLowerCase();
+  if (romanosANumero[ultima]) return romanosANumero[ultima];
+  if (/^\d$/.test(ultima)) return parseInt(ultima);
+  return null;
+}
+
 async function validarDireccion(direccionTexto) {
   try {
     const apiKey = process.env.GOOGLE_MAPS_KEY;
@@ -41,9 +60,19 @@ async function validarDireccion(direccionTexto) {
     if (resultado.partial_match) {
       const numeroCliente = direccionTexto.match(/\d+/)?.[0];
       const calleCoincide = numeroCliente && resultado.formatted_address.includes(numeroCliente);
-      if (!calleCoincide) {
-        logger.warn(`Coincidencia parcial (poco confiable): "${direccionTexto}" -> "${resultado.formatted_address}"`);
-        return { valida: false, direccion: direccionTexto, coords: null, error: "coincidencia_parcial" };
+
+      // Verificar tambien el numero de etapa/seccion (ver extraerNumeroEtapa).
+      // Si ambos textos mencionan una etapa y NO coinciden, es una direccion
+      // distinta aunque el numero de calle si coincida (ej. "Alteña II" vs
+      // "Alteña III" comparten el "22" de la calle pero son fraccionamientos
+      // distintos).
+      const etapaCliente = extraerNumeroEtapa(direccionTexto);
+      const etapaGoogle = extraerNumeroEtapa(resultado.formatted_address);
+      const etapaConflictiva = etapaCliente && etapaGoogle && etapaCliente !== etapaGoogle;
+
+      if (!calleCoincide || etapaConflictiva) {
+        logger.warn(`Coincidencia parcial (poco confiable): "${direccionTexto}" -> "${resultado.formatted_address}"${etapaConflictiva ? ` (etapa ${etapaCliente} vs ${etapaGoogle})` : ""}`);
+        return { valida: false, direccion: direccionTexto, coords: null, error: etapaConflictiva ? "etapa_no_coincide" : "coincidencia_parcial" };
       }
       logger.info(`Coincidencia parcial aceptada (mismo numero de calle): "${direccionTexto}" -> "${resultado.formatted_address}"`);
     }

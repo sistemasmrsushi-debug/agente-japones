@@ -362,6 +362,15 @@ async function obtenerMenu() {
   return rows;
 }
 
+// Para el panel de administracion: trae TODOS los platillos, activos e
+// inactivos, para que se puedan ver y reactivar los que se "quitaron". La
+// version de arriba (obtenerMenu) sigue usandose para el bot/agente de IA,
+// que solo debe ver los platillos activos.
+async function obtenerMenuAdmin() {
+  const { rows } = await pool.query("SELECT * FROM menu_items ORDER BY categoria, orden, nombre");
+  return rows;
+}
+
 async function crearItemMenu({ categoria, nombre, precio, descripcion, orden }) {
   const { rows } = await pool.query(`
     INSERT INTO menu_items (categoria, nombre, precio, descripcion, orden)
@@ -495,6 +504,7 @@ module.exports = {
   insertarSucursalSiNoExiste,
   actualizarCoordenadasSucursal,
   obtenerMenu,
+  obtenerMenuAdmin,
   crearItemMenu,
   actualizarItemMenu,
   eliminarItemMenu,

@@ -14,7 +14,7 @@ const { requireGerente } = require("./auth");
 
 router.get("/api/admin/menu", requireGerente, async (req, res) => {
   try {
-    const items = await db.obtenerMenu();
+    const items = await db.obtenerMenuAdmin();
     res.json(items);
   } catch (err) {
     logger.error("Error obteniendo menu: " + err.message);
