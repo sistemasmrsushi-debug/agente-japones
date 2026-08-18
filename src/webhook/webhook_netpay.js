@@ -27,6 +27,18 @@ async function enviarMensaje(telefono, texto) {
   }
 }
 
+// Manda una alerta de WhatsApp al numero configurado para avisos urgentes
+// (ej. posibles pagos duplicados) -- sin esto, esos casos solo quedaban
+// registrados en los logs de Railway, sin que nadie se enterara a tiempo.
+async function enviarAlertaGerente(texto) {
+  const telefono = process.env.TELEFONO_ALERTAS_GERENTE;
+  if (!telefono) {
+    logger.warn("TELEFONO_ALERTAS_GERENTE no esta configurada -- no se pudo mandar la alerta");
+    return;
+  }
+  await enviarMensaje(`whatsapp:${telefono}`, `⚠️ ALERTA Mr. Sushi\n\n${texto}`);
+}
+
 // Arma los datos de recoleccion (la sucursal) y entrega (el domicilio del
 // cliente, ya validado con Google Maps) y crea la entrega en Uber Direct.
 async function despacharUberDirect(pedido) {
@@ -131,6 +143,9 @@ router.post("/webhook/netpay", async (req, res) => {
 
           if (yaEstabaPagado) {
             logger.warn(`POSIBLE PAGO DUPLICADO: el pedido ${referenciaPedido} ya estaba en estado "${pedido.estado}" cuando llego OTRO webhook de pago exitoso (transactionId=${transactionId}, monto=${amount}). Revisar manualmente si hubo un cobro doble y si procede un reembolso.`);
+            await enviarAlertaGerente(
+              `Posible PAGO DUPLICADO detectado.\n\nPedido: ${referenciaPedido}\nEstado previo: ${pedido.estado}\nMonto: $${amount}\ntransactionId nuevo: ${transactionId}\n\nRevisa manualmente en Netpay si hubo doble cobro y si procede reembolso.`
+            );
             break;
           }
 
