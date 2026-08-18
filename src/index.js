@@ -29,6 +29,7 @@ const webhookNetpayRouter = require("./webhook/webhook_netpay");
 const pagoPaginasRouter = require("./webhook/pago_paginas");
 const webhookUberRouter = require("./webhook/webhook_uber");
 const { initDB } = require("./db/database");
+const { iniciarAutocancelacion } = require("./utils/autocancelar_pedidos");
 
 // ── RATE LIMITING ─────────────────────────────────────────────────────────────
 // Limita peticiones por IP para evitar spam/ataques al webhook
@@ -124,6 +125,7 @@ async function iniciar() {
       }, 5 * 60 * 1000);
 
       logger.info(`Keep-alive activo -> ping cada 5 min a ${URL_PROPIA}`);
+      iniciarAutocancelacion();
     });
   } catch(err) {
     logger.error("Error iniciando: " + err.message);

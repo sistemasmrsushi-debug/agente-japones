@@ -167,6 +167,18 @@ async function obtenerPedidoPendientePagoPorTelefono(telefono) {
   return rows[0] || null;
 }
 
+// Pedidos ya "pendiente" (confirmados/pagados, listos para preparar) que
+// llevan mas de X minutos sin que nadie del restaurante los marque como
+// "en_proceso" -- candidatos a cancelar automaticamente para no dejar al
+// cliente esperando indefinidamente si el pedido se les paso por alto.
+async function obtenerPedidosPendientesVencidos(minutosLimite) {
+  const { rows } = await pool.query(
+    `SELECT * FROM pedidos WHERE estado = 'pendiente' AND fecha < NOW() - ($1 * INTERVAL '1 minute')`,
+    [minutosLimite]
+  );
+  return rows;
+}
+
 async function actualizarEstadoPedido(id, estado) {
   const { rows } = await pool.query(
     "UPDATE pedidos SET estado=$1, actualizado=NOW() WHERE id=$2 RETURNING *",
@@ -487,6 +499,7 @@ module.exports = {
   guardarPedido,
   obtenerPedidos,
   obtenerPedidoPendientePagoPorTelefono,
+  obtenerPedidosPendientesVencidos,
   actualizarEstadoPedido,
   actualizarGPSPedido,
   guardarEntregaUber,
