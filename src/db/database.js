@@ -94,6 +94,10 @@ async function initDB() {
     // (necesarias para calcular distancia real al domicilio del cliente).
     await client.query(`ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS lat NUMERIC;`);
     await client.query(`ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS lng NUMERIC;`);
+    // Para poder desactivar temporalmente una sucursal (ej. mientras tiene un
+    // menu distinto o algun otro problema) sin borrarla -- el bot deja de
+    // ofrecerla/asignarle pedidos, pero sigue existiendo para referencia.
+    await client.query(`ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS activo BOOLEAN DEFAULT TRUE;`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS menu_items (
         id SERIAL PRIMARY KEY,
@@ -333,7 +337,7 @@ async function obtenerSucursales() {
 }
 
 async function actualizarSucursal(id, campos) {
-  const permitidos = ["direccion", "telefono", "telefono_transferencia", "whatsapp", "horario_apertura", "horario_cierre"];
+  const permitidos = ["direccion", "telefono", "telefono_transferencia", "whatsapp", "horario_apertura", "horario_cierre", "activo"];
   const sets = [];
   const values = [];
   let i = 1;

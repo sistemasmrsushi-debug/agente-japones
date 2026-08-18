@@ -84,6 +84,22 @@ function tieneDireccion(texto) {
 
 const RADIO_ENTREGA_KM = 5;
 
+// Cruza la lista estatica de sucursales (config/restaurante.js -- nombres,
+// zonas de domicilio) con el estado "activo" que vive en la base de datos
+// (editable desde el panel). Una sucursal desactivada temporalmente (ej.
+// porque tiene un menu distinto) deja de ofrecerse/asignarse, sin tener que
+// tocar codigo ni el archivo de configuracion.
+async function obtenerSucursalesActivas() {
+  const restaurante = require("../../config/restaurante");
+  const sucursalesDB = await db.obtenerSucursales();
+  const activos = new Set(sucursalesDB.filter(s => s.activo !== false).map(s => s.nombre));
+  return restaurante.sucursales.filter(s => activos.has(s.nombre));
+}
+
+function listaNombres(sucursales) {
+  return sucursales.map(s => s.nombre).join(", ");
+}
+
 // Decide la sucursal final que atendera un domicilio, respetando un radio maximo
 // de entrega. Mantiene el sistema de palabras clave (zonaSugerida) como primer
 // intento -- solo busca alternativas si esa sucursal queda demasiado lejos.
@@ -95,7 +111,7 @@ async function resolverSucursalPorDistancia(zonaSugerida, coordsCliente) {
   }
 
   const sucursales = await db.obtenerSucursales();
-  const conCoords = sucursales.filter(s => s.lat && s.lng);
+  const conCoords = sucursales.filter(s => s.lat && s.lng && s.activo !== false);
 
   // Si todavia no se ha corrido el script de geocodificacion de sucursales,
   // no hay con que comparar -- no bloquear pedidos por esto.
@@ -302,6 +318,17 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       // Verificar si el cliente eligio una sucursal diferente a la sugerida
       const sucursalElegida = sucursalDetectadaEnMensaje;
       if (sucursalElegida) {
+        // Si la sucursal que nombro esta desactivada temporalmente (ej. tiene
+        // un menu distinto ahora mismo), avisarle en vez de proceder como si
+        // estuviera disponible.
+        const sucursalesActivasAqui = await obtenerSucursalesActivas();
+        const estaActiva = sucursalesActivasAqui.some(s => s.nombre === sucursalElegida.nombre);
+        if (!estaActiva) {
+          await enviarMensaje(telefono,
+            `Por el momento no estamos recibiendo pedidos en ${sucursalElegida.nombre}. ¿Prefieres alguna de estas? ${listaNombres(sucursalesActivasAqui)}`
+          );
+          return;
+        }
         // Si el cliente nombro una sucursal especifica, validar que SI quede
         // dentro del radio de entrega -- antes se aceptaba sin verificar,
         // lo cual permitia pedir una sucursal fuera de rango sin restriccion.
@@ -443,7 +470,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       if (!resolucion.dentroDeRadio) {
         await db.eliminarEstadoPedido(telefono); // limpiar estado para que el siguiente mensaje fluya normal con la IA
         await enviarMensaje(telefono,
-          `Tu direccion (${dirFinal}) queda fuera de nuestra zona de entrega a domicilio (radio de ${RADIO_ENTREGA_KM} km de cualquiera de nuestras sucursales). ¿Prefieres recoger tu pedido en alguna sucursal? Tenemos: ${require("../../config/restaurante").sucursales.map(s=>s.nombre).join(", ")}`
+          `Tu direccion (${dirFinal}) queda fuera de nuestra zona de entrega a domicilio (radio de ${RADIO_ENTREGA_KM} km de cualquiera de nuestras sucursales). ¿Prefieres recoger tu pedido en alguna sucursal? Tenemos: ${listaNombres(await obtenerSucursalesActivas())}`
         );
         return;
       }
@@ -475,7 +502,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         );
       } else {
         await enviarMensaje(telefono,
-          `Direccion confirmada: ${dirFinal}\n\nCual sucursal prefieres? Tenemos: ${require("../../config/restaurante").sucursales.map(s=>s.nombre).join(", ")}`
+          `Direccion confirmada: ${dirFinal}\n\nCual sucursal prefieres? Tenemos: ${listaNombres(await obtenerSucursalesActivas())}`
         );
       }
       return;
@@ -484,7 +511,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
     // ── CASO 3: Domicilio + direccion en mismo mensaje ────────────────────
     if (pideDomicilio(mensaje) && tieneDireccion(mensaje)) {
       const historial = await db.obtenerHistorial(telefono);
-      const resultado = await procesarMensaje(historial, mensaje);
+      const resultado = await procesarMensaje(historial, mensaje, await obtenerSucursalesActivas());
       await db.guardarHistorial(telefono, resultado.historialActualizado);
 
       // Validar direccion con Google Maps
@@ -514,7 +541,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         if (!resolucion.dentroDeRadio) {
           await db.eliminarEstadoPedido(telefono);
           await enviarMensaje(telefono,
-            `Tu direccion (${dirFinal}) queda fuera de nuestra zona de entrega a domicilio (radio de ${RADIO_ENTREGA_KM} km de cualquiera de nuestras sucursales). ¿Prefieres recoger tu pedido en alguna sucursal? Tenemos: ${require("../../config/restaurante").sucursales.map(s=>s.nombre).join(", ")}`
+            `Tu direccion (${dirFinal}) queda fuera de nuestra zona de entrega a domicilio (radio de ${RADIO_ENTREGA_KM} km de cualquiera de nuestras sucursales). ¿Prefieres recoger tu pedido en alguna sucursal? Tenemos: ${listaNombres(await obtenerSucursalesActivas())}`
           );
           return;
         }
@@ -559,8 +586,9 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
     }
 
     // ── CASO 5: Flujo normal con Groq ─────────────────────────────────────
+    const sucursalesActivasCaso5 = await obtenerSucursalesActivas();
     const historial = await db.obtenerHistorial(telefono);
-    const resultado = await procesarMensaje(historial, mensaje);
+    const resultado = await procesarMensaje(historial, mensaje, sucursalesActivasCaso5);
     await db.guardarHistorial(telefono, resultado.historialActualizado);
 
     // Detectar si el agente esta pidiendo la direccion al cliente
@@ -572,9 +600,10 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
     if (pidioDir && tieneProductos && !estado) {
       const items = resultado.datos?.pedido?.items ||
         extraerItemsConPreciosReales(resultado.historialActualizado);
-      // Detectar si el agente ya menciono una sucursal en su respuesta
-      const restauranteConfig = require("../../config/restaurante");
-      const sucursalEnTexto = restauranteConfig.sucursales.find(s =>
+      // Detectar si el agente ya menciono una sucursal en su respuesta (solo
+      // entre las activas -- ya no deberia mencionar una inactiva porque el
+      // prompt tampoco se la ofrece, pero se filtra aqui tambien por si acaso)
+      const sucursalEnTexto = sucursalesActivasCaso5.find(s =>
         resultado.texto.toLowerCase().includes(s.nombre.toLowerCase())
       );
       await db.guardarEstadoPedido(telefono, {

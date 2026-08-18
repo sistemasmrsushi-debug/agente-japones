@@ -52,17 +52,17 @@ function detectarSucursalPorZona(texto) {
   return mejorMatch;
 }
 
-function detectarSucursalMencionada(mensaje) {
+function detectarSucursalMencionada(mensaje, sucursalesActivas) {
   const texto = mensaje.toLowerCase();
-  return restaurante.sucursales.find(s => texto.includes(s.nombre.toLowerCase()));
+  return (sucursalesActivas || restaurante.sucursales).find(s => texto.includes(s.nombre.toLowerCase()));
 }
 
-function listaSucursalesCorta() {
-  return restaurante.sucursales.map(s => s.nombre).join(", ");
+function listaSucursalesCorta(sucursalesActivas) {
+  return (sucursalesActivas || restaurante.sucursales).map(s => s.nombre).join(", ");
 }
 
 // ── SYSTEM PROMPT ─────────────────────────────────────────────────────────────
-function buildSystemPrompt(sucursalRelevante) {
+function buildSystemPrompt(sucursalRelevante, sucursalesActivas) {
   let bloqueHorario = "";
   if (sucursalRelevante) {
     const horario = sucursalRelevante.horario_propio || restaurante.horario_general;
@@ -106,7 +106,7 @@ ETIQUETAS DEL SISTEMA (invisibles para el cliente, solo al final del mensaje):
 [ESCALAR]{"accion":"ESCALAR_HUMANO","motivo":"..."}[/ESCALAR]
 
 DOMICILIO: Envío gratis | ~40 min | Sin restricciones de zona
-SUCURSALES: ${listaSucursalesCorta()}
+SUCURSALES: ${listaSucursalesCorta(sucursalesActivas)}
 ${bloqueHorario}
 
 MENÚ COMPLETO (precios exactos, no los modifiques):
@@ -140,17 +140,17 @@ function limitarHistorial(historial, maxTurnos = 6) {
   return historial.length <= max ? historial : historial.slice(-max);
 }
 
-async function procesarMensaje(historial, mensajeNuevo) {
+async function procesarMensaje(historial, mensajeNuevo, sucursalesActivas) {
   try {
     const openai = getOpenAI();
     const historialLimitado = limitarHistorial(historial);
     const textoReciente = [mensajeNuevo, ...historialLimitado.slice(-2).map(m => m.content)].join(" ");
-    const sucursalRelevante = detectarSucursalMencionada(textoReciente);
+    const sucursalRelevante = detectarSucursalMencionada(textoReciente, sucursalesActivas);
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: buildSystemPrompt(sucursalRelevante) },
+        { role: "system", content: buildSystemPrompt(sucursalRelevante, sucursalesActivas) },
         ...historialLimitado.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })),
         { role: "user", content: mensajeNuevo },
       ],
