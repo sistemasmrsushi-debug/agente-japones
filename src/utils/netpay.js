@@ -81,7 +81,7 @@ function validarBilling(billing) {
 }
 
 // ── GENERAR LINK DE PAGO ──────────────────────────────────────────────────────
-async function generarLinkPago({ items, referencia, telefono, nombreCliente, direccion, colonia, municipio, estadoDireccion, codigoPostal, secretKey }) {
+async function generarLinkPago({ items, referencia, telefono, nombreCliente, direccion, colonia, municipio, estadoDireccion, codigoPostal, secretKey, emailFacturacionOverride }) {
   return new Promise((resolve, reject) => {
     const key = secretKey || process.env.NETPAY_SECRET_KEY;
 
@@ -121,7 +121,7 @@ async function generarLinkPago({ items, referencia, telefono, nombreCliente, dir
     // real del cliente (todavia no lo capturamos en la conversacion de WhatsApp).
     const emailFacturacion = process.env.NETPAY_ENV === "production"
       ? "cliente@mrsushi.mx" // placeholder hasta que capturemos el email real del cliente
-      : "accept@netpay.com.mx"; // correo de prueba de Netpay para transacciones aceptadas
+      : (emailFacturacionOverride || "accept@netpay.com.mx"); // sandbox: permite forzar reject@/review@ para certificacion; sin override, sigue igual que antes
 
     const billing = {
       firstName,

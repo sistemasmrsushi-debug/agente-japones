@@ -177,17 +177,17 @@ router.post("/webhook/netpay", async (req, res) => {
         // pero en produccion confirmamos (via logs reales) que en la practica
         // manda "transaction.failed" -- se manejan ambos por si acaso.
         //
-        // IMPORTANTE: el campo se llama "transactionTokenId", no "transactionId"
-        // (diferente al payload de "sessionLink.paid"). Y el merchantReferenceCode
-        // ya viene directo en este payload -- no hace falta la consulta extra a
-        // consultarEstatusTransaccion(), que ademas fallaba porque transactionId
-        // siempre era undefined.
-        const { transactionTokenId, amount, merchantReferenceCode, responseMsg } = data.data;
-        logger.warn(`Pago RECHAZADO: transactionTokenId=${transactionTokenId}, monto=${amount}, motivo=${responseMsg}, pedido=${merchantReferenceCode}`);
+        // CORREGIDO (confirmado con logs reales de Railway, 19-ago-2026): los
+        // nombres de campo NO eran transactionTokenId/merchantReferenceCode/
+        // responseMsg -- el payload real trae transactionId, merchantRefCode,
+        // responseCode y procRetMsg. Con los nombres viejos todo salia
+        // "undefined" y el cliente nunca recibia el aviso de pago rechazado.
+        const { transactionId, amount, merchantRefCode, procRetMsg, responseCode } = data.data;
+        logger.warn(`Pago RECHAZADO: transactionId=${transactionId}, monto=${amount}, motivo=${procRetMsg} (codigo ${responseCode}), pedido=${merchantRefCode}`);
 
-        if (merchantReferenceCode) {
+        if (merchantRefCode) {
           const pedidos = await db.obtenerPedidos(null, "gerente");
-          const pedido = pedidos.find(p => p.id === merchantReferenceCode);
+          const pedido = pedidos.find(p => p.id === merchantRefCode);
           if (pedido?.telefono_cliente) {
             await enviarMensaje(pedido.telefono_cliente,
               `Tu pago no pudo procesarse. Quieres intentar con otra tarjeta? Responde "reintentar pago" y te mandamos un nuevo link.`
