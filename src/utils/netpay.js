@@ -13,6 +13,73 @@ function getHostname() {
   return process.env.NETPAY_ENV === "production" ? HOSTNAME_PROD : HOSTNAME_SANDBOX;
 }
 
+// Mapeo de estados de Mexico a su codigo ISO 3166-2:MX (subdivision, sin el
+// prefijo "MX-"). Necesario porque Google Maps regresa el nombre largo del
+// estado (ej. "Ciudad de Mexico", "Jalisco"), pero Netpay exige el estandar
+// ISO para el objeto de facturacion (Matriz de certificacion Netpay, criterio
+// "Estandarizacion de Ubicacion").
+const ESTADOS_ISO_MX = {
+  "aguascalientes": "AGU", "baja california": "BCN", "baja california sur": "BCS",
+  "campeche": "CAM", "chiapas": "CHP", "chihuahua": "CHH",
+  "ciudad de mexico": "CMX", "distrito federal": "CMX",
+  "coahuila": "COA", "coahuila de zaragoza": "COA",
+  "colima": "COL", "durango": "DUR",
+  "estado de mexico": "MEX", "mexico": "MEX",
+  "guanajuato": "GUA", "guerrero": "GRO", "hidalgo": "HID", "jalisco": "JAL",
+  "michoacan": "MIC", "michoacan de ocampo": "MIC", "morelos": "MOR",
+  "nayarit": "NAY", "nuevo leon": "NLE", "oaxaca": "OAX", "puebla": "PUE",
+  "queretaro": "QUE", "quintana roo": "ROO", "san luis potosi": "SLP",
+  "sinaloa": "SIN", "sonora": "SON", "tabasco": "TAB", "tamaulipas": "TAM",
+  "tlaxcala": "TLA", "veracruz": "VER", "veracruz de ignacio de la llave": "VER",
+  "yucatan": "YUC", "zacatecas": "ZAC",
+};
+
+function estadoAIso(nombreEstado) {
+  if (!nombreEstado) return "";
+  const limpio = nombreEstado.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  return ESTADOS_ISO_MX[limpio] || nombreEstado; // si no se reconoce, se manda tal cual -- mejor que vacio
+}
+
+// ── VALIDACIONES EXIGIDAS POR LA MATRIZ DE CERTIFICACION NETPAY ───────────────
+// 1. Ningun monto en $0.
+// 2. Ningun campo de billing vacio.
+// 3. Ningun campo de billing con caracteres no permitidos. Se aceptan letras
+//    (con acentos/enie), numeros, espacios, y puntuacion tipica de
+//    direcciones mexicanas (# . , - /) -- una regla que solo permitiera
+//    letras y numeros bloquearia direcciones reales como "Av. Reforma #123".
+const CAMPO_VALIDO_REGEX = /^[a-zA-Z0-9À-ÿñÑ\s.,#\-\/]+$/;
+
+function validarLineItems(lineItems) {
+  for (const item of lineItems) {
+    if (!item.amount || Number(item.amount) <= 0) {
+      return `El producto "${item.name}" tiene un monto invalido ($${item.amount}). No se permite generar un link de pago con monto $0 o negativo.`;
+    }
+  }
+  return null;
+}
+
+function validarBilling(billing) {
+  const campos = {
+    "Nombre": billing.firstName,
+    "Apellido": billing.lastName,
+    "Telefono": billing.phone,
+    "Direccion": billing.address.street1,
+    "Ciudad": billing.address.city,
+    "Estado": billing.address.state,
+    "Codigo postal": billing.address.postalCode,
+    "Pais": billing.address.country,
+  };
+  for (const [etiqueta, valor] of Object.entries(campos)) {
+    if (!valor || !String(valor).trim()) {
+      return `El campo de facturacion "${etiqueta}" no puede estar vacio.`;
+    }
+    if (!CAMPO_VALIDO_REGEX.test(valor)) {
+      return `El campo de facturacion "${etiqueta}" contiene caracteres no permitidos: "${valor}"`;
+    }
+  }
+  return null;
+}
+
 // ── GENERAR LINK DE PAGO ──────────────────────────────────────────────────────
 async function generarLinkPago({ items, referencia, telefono, nombreCliente, direccion, colonia, municipio, estadoDireccion, codigoPostal, secretKey }) {
   return new Promise((resolve, reject) => {
@@ -65,11 +132,24 @@ async function generarLinkPago({ items, referencia, telefono, nombreCliente, dir
         street1: direccion || "",
         street2: "",
         city: municipio || "",
-        state: estadoDireccion || "",
+        state: estadoAIso(estadoDireccion),
         postalCode: codigoPostal || "",
-        country: "Mexico",
+        country: "MX", // ISO 3166-1 Alfa-2 (antes decia "Mexico", el nombre completo)
       },
     };
+
+    // Validaciones exigidas por la matriz de certificacion, antes de mandar
+    // cualquier cosa a Netpay.
+    const errorMonto = validarLineItems(lineItems);
+    if (errorMonto) {
+      logger.error(`Validacion de monto fallida: ${errorMonto}`);
+      return resolve({ exito: false, error: errorMonto });
+    }
+    const errorBilling = validarBilling(billing);
+    if (errorBilling) {
+      logger.error(`Validacion de billing fallida: ${errorBilling}`);
+      return resolve({ exito: false, error: errorBilling });
+    }
 
     const body = JSON.stringify({
       successUrl: `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/pago/exitoso`,
