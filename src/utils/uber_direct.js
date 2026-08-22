@@ -145,7 +145,14 @@ async function crearCotizacion({ pickup, dropoff }) {
 }
 
 // ── CREAR ENTREGA (dispara el envio de un repartidor de Uber) ──────────────────
-async function crearEntrega({ pickup, dropoff, items, referencia, quoteId }) {
+// testSpecifications: SOLO para pruebas -- activa "Robo Courier" (repartidor
+// simulado, sin despachar a nadie de verdad). Segun documentacion oficial
+// (https://developer.uber.com/docs/deliveries/guides/robocourier), Uber NO
+// distingue automaticamente entre Test App y App real -- la simulacion SOLO
+// se activa si se manda este parametro explicitamente en la peticion. Sin el,
+// una entrega se procesa igual sea cual sea el tipo de credenciales. Ejemplo
+// para pruebas: { robo_courier_specification: { mode: "auto" } }
+async function crearEntrega({ pickup, dropoff, items, referencia, quoteId, testSpecifications }) {
   const token = await obtenerAccessToken();
   if (!token) return { exito: false, error: "No se pudo obtener token de Uber Direct" };
 
@@ -173,6 +180,7 @@ async function crearEntrega({ pickup, dropoff, items, referencia, quoteId }) {
     external_store_id: referencia,
   };
   if (quoteId) cuerpo.quote_id = quoteId;
+  if (testSpecifications) cuerpo.test_specifications = testSpecifications;
 
   const body = JSON.stringify(cuerpo);
 
