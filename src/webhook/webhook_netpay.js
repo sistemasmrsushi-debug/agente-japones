@@ -165,7 +165,11 @@ router.post("/webhook/netpay", async (req, res) => {
             logger.warn(`Pago TARDIO recibido para el pedido ${referenciaPedido} (ya se habia cancelado internamente por pasar los 15 min, pero el link de Netpay seguia activo). Se honra el pago igualmente.`);
           }
 
-          await db.actualizarEstadoPedido(referenciaPedido, "pendiente"); // pasa de pendiente_pago (o cancelado) a pendiente (confirmado, listo para preparar)
+          // CORREGIDO: marcarPedidoPagado() ademas de pasar el pedido a "pendiente"
+          // (de pendiente_pago o cancelado), registra pago_confirmado_en=NOW() --
+          // el auto-cancelador de pedidos sin aceptar cuenta sus 15 min desde ahi,
+          // no desde la creacion original del pedido.
+          await db.marcarPedidoPagado(referenciaPedido);
           logger.info(`Pedido ${referenciaPedido} marcado como pagado`);
 
           if (pedido?.telefono_cliente) {

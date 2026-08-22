@@ -51,6 +51,14 @@ async function initDB() {
     await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS uber_delivery_id TEXT;`);
     await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS uber_estado TEXT;`);
     await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS uber_tracking_url TEXT;`);
+    // CORRECCION: momento exacto en que se confirmo el pago (distinto de
+    // "fecha", que es cuando se creo el pedido). El auto-cancelador de
+    // pedidos "pendiente" sin aceptar debe contar sus 15 min desde que se
+    // confirmo el pago, no desde la creacion -- si no, un pago que tardo en
+    // completarse (o uno tardio, ya cancelado y luego honrado) hacia que el
+    // pedido apareciera "vencido" casi de inmediato aunque el restaurante
+    // apenas lo estuviera viendo.
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS pago_confirmado_en TIMESTAMPTZ;`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS reservaciones (
         id TEXT PRIMARY KEY,
@@ -175,9 +183,15 @@ async function obtenerPedidoPendientePagoPorTelefono(telefono) {
 // llevan mas de X minutos sin que nadie del restaurante los marque como
 // "en_proceso" -- candidatos a cancelar automaticamente para no dejar al
 // cliente esperando indefinidamente si el pedido se les paso por alto.
+//
+// CORREGIDO: el limite se cuenta desde pago_confirmado_en (cuando se
+// confirmo el pago), no desde fecha (cuando se creo el pedido). Para
+// pedidos que nunca pasan por pago (mostrador, telefono) pago_confirmado_en
+// queda NULL y el COALESCE regresa a usar fecha, que sigue siendo correcto
+// en esos casos.
 async function obtenerPedidosPendientesVencidos(minutosLimite) {
   const { rows } = await pool.query(
-    `SELECT * FROM pedidos WHERE estado = 'pendiente' AND fecha < NOW() - ($1 * INTERVAL '1 minute')`,
+    `SELECT * FROM pedidos WHERE estado = 'pendiente' AND COALESCE(pago_confirmado_en, fecha) < NOW() - ($1 * INTERVAL '1 minute')`,
     [minutosLimite]
   );
   return rows;
@@ -187,6 +201,18 @@ async function actualizarEstadoPedido(id, estado) {
   const { rows } = await pool.query(
     "UPDATE pedidos SET estado=$1, actualizado=NOW() WHERE id=$2 RETURNING *",
     [estado, id]
+  );
+  return rows[0] || null;
+}
+
+// Usar SOLO cuando se confirma un pago real (ej. webhook de Netpay
+// sessionLink.paid) -- ademas de pasar el pedido a "pendiente", registra el
+// momento exacto del pago en pago_confirmado_en para que el auto-cancelador
+// cuente sus 15 min desde ahi y no desde la creacion del pedido.
+async function marcarPedidoPagado(id) {
+  const { rows } = await pool.query(
+    "UPDATE pedidos SET estado='pendiente', pago_confirmado_en=NOW(), actualizado=NOW() WHERE id=$1 RETURNING *",
+    [id]
   );
   return rows[0] || null;
 }
@@ -505,6 +531,7 @@ module.exports = {
   obtenerPedidoPendientePagoPorTelefono,
   obtenerPedidosPendientesVencidos,
   actualizarEstadoPedido,
+  marcarPedidoPagado,
   actualizarGPSPedido,
   guardarEntregaUber,
   actualizarEstadoUber,
