@@ -145,101 +145,13 @@ async function crearCotizacion({ pickup, dropoff }) {
 }
 
 // ── CREAR ENTREGA (dispara el envio de un repartidor de Uber) ──────────────────
-async function crearEntrega({ pickup, dropoff, items, referencia, quoteId }) {
+// testSpecifications: SOLO para pruebas -- activa "Robo Courier" (repartidor
+// simulado, sin despachar a nadie de verdad). Segun documentacion oficial
+// (https://developer.uber.com/docs/deliveries/guides/robocourier), Uber NO
+// distingue automaticamente entre Test App y App real -- la simulacion SOLO
+// se activa si se manda este parametro explicitamente en la peticion. Sin el,
+// una entrega se procesa igual sea cual sea el tipo de credenciales. Ejemplo
+// para pruebas: { robo_courier_specification: { mode: "auto" } }
+async function crearEntrega({ pickup, dropoff, items, referencia, quoteId, testSpecifications }) {
   const token = await obtenerAccessToken();
   if (!token) return { exito: false, error: "No se pudo obtener token de Uber Direct" };
-
-  const customerId = process.env.UBER_DIRECT_CUSTOMER_ID;
-
-  const manifestItems = (items || []).map((i) => ({
-    name: i.nombre,
-    quantity: i.cantidad || 1,
-    price: Math.round((i.precio || 0) * 100), // Uber espera centavos
-  }));
-
-  const cuerpo = {
-    pickup_name: pickup.nombre,
-    pickup_address: armarDireccionUber(pickup),
-    pickup_phone_number: pickup.telefono,
-    pickup_latitude: pickup.lat,
-    pickup_longitude: pickup.lng,
-    dropoff_name: dropoff.nombre,
-    dropoff_address: armarDireccionUber(dropoff),
-    dropoff_phone_number: dropoff.telefono,
-    dropoff_latitude: dropoff.lat,
-    dropoff_longitude: dropoff.lng,
-    manifest_items: manifestItems,
-    manifest_reference: referencia,
-    external_store_id: referencia,
-  };
-  if (quoteId) cuerpo.quote_id = quoteId;
-
-  const body = JSON.stringify(cuerpo);
-
-  const respuesta = await requestJSON({
-    hostname: API_HOSTNAME,
-    path: `/v1/customers/${customerId}/deliveries`,
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`,
-      "Content-Length": Buffer.byteLength(body),
-    },
-    body,
-  });
-
-  logger.info(`Crear entrega Uber Direct -> status: ${respuesta.statusCode}, body: ${respuesta.raw?.substring(0, 400)}`);
-
-  if ((respuesta.statusCode === 200 || respuesta.statusCode === 201) && respuesta.json?.id) {
-    return {
-      exito: true,
-      deliveryId: respuesta.json.id,
-      estado: respuesta.json.status,
-      trackingUrl: respuesta.json.tracking_url,
-      dropoffEta: respuesta.json.dropoff_eta,
-      raw: respuesta.json,
-    };
-  }
-
-  return { exito: false, error: respuesta.json?.message || `Error ${respuesta.statusCode}`, raw: respuesta.json };
-}
-
-// ── CONSULTAR ENTREGA (respaldo si un webhook se pierde) ────────────────────────
-async function consultarEntrega(deliveryId) {
-  const token = await obtenerAccessToken();
-  if (!token) return { exito: false, error: "No se pudo obtener token de Uber Direct" };
-
-  const customerId = process.env.UBER_DIRECT_CUSTOMER_ID;
-  const respuesta = await requestJSON({
-    hostname: API_HOSTNAME,
-    path: `/v1/customers/${customerId}/deliveries/${deliveryId}`,
-    method: "GET",
-    headers: { "Authorization": `Bearer ${token}` },
-  });
-
-  if (respuesta.statusCode === 200) {
-    return { exito: true, raw: respuesta.json };
-  }
-  return { exito: false, error: respuesta.json?.message || `Error ${respuesta.statusCode}` };
-}
-
-// ── CANCELAR ENTREGA ─────────────────────────────────────────────────────────────
-async function cancelarEntrega(deliveryId) {
-  const token = await obtenerAccessToken();
-  if (!token) return { exito: false, error: "No se pudo obtener token de Uber Direct" };
-
-  const customerId = process.env.UBER_DIRECT_CUSTOMER_ID;
-  const respuesta = await requestJSON({
-    hostname: API_HOSTNAME,
-    path: `/v1/customers/${customerId}/deliveries/${deliveryId}/cancel`,
-    method: "POST",
-    headers: { "Authorization": `Bearer ${token}`, "Content-Length": 0 },
-  });
-
-  if (respuesta.statusCode === 200) {
-    return { exito: true };
-  }
-  return { exito: false, error: respuesta.json?.message || `Error ${respuesta.statusCode}` };
-}
-
-module.exports = { crearCotizacion, crearEntrega, consultarEntrega, cancelarEntrega };
