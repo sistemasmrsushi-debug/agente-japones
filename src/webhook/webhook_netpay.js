@@ -62,12 +62,18 @@ async function despacharUberDirect(pedido) {
       lat: Number(sucursal.lat),
       lng: Number(sucursal.lng),
     };
+    // CORREGIDO (confirmado con logs reales, 22-ago-2026): pedido.direccion ya
+    // es la direccion COMPLETA validada por Google Maps (calle, colonia, CP,
+    // municipio y estado, todo en un solo texto). Antes tambien se mandaban
+    // municipio/estado_direccion/codigo_postal por separado, duplicando esos
+    // datos dentro del mismo request -- Uber Direct rechazaba la entrega con
+    // "failed to create location" porque su geocodificador no podia resolver
+    // la direccion con esa informacion repetida/contradictoria. El pickup
+    // (sucursal) nunca tuvo este problema porque nunca mando esos campos por
+    // separado -- aqui se hace lo mismo: solo texto completo + lat/lng.
     const dropoff = {
       nombre: pedido.nombre_cliente || "Cliente Mr. Sushi",
       calle: pedido.direccion,
-      ciudad: pedido.municipio,
-      estado: pedido.estado_direccion,
-      codigoPostal: pedido.codigo_postal,
       telefono: (pedido.telefono_cliente || "").replace("whatsapp:", ""),
       lat: pedido.ubicacion_gps.latitude,
       lng: pedido.ubicacion_gps.longitude,
