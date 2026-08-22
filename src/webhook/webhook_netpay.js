@@ -73,11 +73,23 @@ async function despacharUberDirect(pedido) {
       lng: pedido.ubicacion_gps.longitude,
     };
 
+    // Interruptor de pruebas: mientras UBER_DIRECT_MODO_PRUEBA=true este
+    // configurado en Railway, todos los despachos se crean en modo "Robo
+    // Courier" (repartidor SIMULADO, sin costo ni despacho real), para poder
+    // probar el flujo completo del bot (WhatsApp -> pago -> despacho) sin
+    // afectar operacion real. Quitar la variable (o ponerla en "false")
+    // antes de operar con clientes reales.
+    const modoPrueba = process.env.UBER_DIRECT_MODO_PRUEBA === "true";
+    if (modoPrueba) {
+      logger.warn(`UBER_DIRECT_MODO_PRUEBA activo -- el despacho de ${pedido.id} sera SIMULADO (Robo Courier), no se manda repartidor real.`);
+    }
+
     const resultado = await crearEntrega({
       pickup,
       dropoff,
       items: pedido.items,
       referencia: pedido.id,
+      testSpecifications: modoPrueba ? { robo_courier_specification: { mode: "auto" } } : undefined,
     });
 
     if (resultado.exito) {
