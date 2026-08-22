@@ -147,6 +147,96 @@ async function resolverSucursalPorDistancia(zonaSugerida, coordsCliente) {
   return { sucursal: null, dentroDeRadio: false, cambio: false };
 }
 
+// ── Crea el pedido a domicilio y manda el link de pago ─────────────────────────
+// CORREGIDO: antes, tanto CASO 2 como CASO 3 preguntaban "te enviamos desde ahi
+// o prefieres otra?" incluso cuando el sistema ya habia determinado con certeza
+// la sucursal mas cercana dentro del radio de entrega -- una pregunta de mas
+// que solo agregaba friccion sin necesidad. Ahora, en cuanto se sabe la
+// sucursal, se crea el pedido y se manda el link de pago directo (esta funcion,
+// compartida por los 3 lugares que la necesitan: CASO 1, CASO 2 y CASO 3).
+async function crearPedidoDomicilioYPedirPago(telefono, opts) {
+  let items = opts.items && opts.items.length > 0
+    ? opts.items
+    : extraerItemsConPreciosReales(await db.obtenerHistorial(telefono));
+  items = items.map(item => {
+    const real = buscarPlatillo(item.nombre);
+    return real ? { nombre: real.nombre, precio: real.precio, cantidad: item.cantidad || 1 } : item;
+  });
+
+  const pedido = {
+    id: `PED-${Date.now()}`,
+    fecha: new Date().toISOString(),
+    estado: "pendiente_pago",
+    telefono_cliente: telefono,
+    nombre_cliente: opts.nombreCliente || null,
+    sucursal: opts.sucursal,
+    items,
+    tipo: "domicilio",
+    direccion: opts.direccion || null,
+    colonia: opts.colonia || null,
+    municipio: opts.municipio || null,
+    estado_direccion: opts.estadoDireccion || null,
+    codigo_postal: opts.codigoPostal || null,
+    referencias: opts.referencias || null,
+    ubicacion_gps: opts.coords ? {
+      latitude: opts.coords.lat,
+      longitude: opts.coords.lng,
+      maps_url: opts.mapsUrl || `https://maps.google.com/?q=${opts.coords.lat},${opts.coords.lng}`
+    } : null,
+  };
+  await db.guardarPedido(pedido);
+  await db.eliminarEstadoPedido(telefono);
+  await db.guardarHistorial(telefono, []);
+  logger.info(`Pedido pre-registrado (pendiente de pago): ${pedido.id} -> ${pedido.sucursal}`);
+
+  const total = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
+  const itemsTexto = items.map(i => `${i.cantidad || 1}x ${i.nombre} ($${i.precio})`).join("\n");
+
+  const resultadoPago = await generarLinkPago({
+    items,
+    referencia: pedido.id,
+    telefono,
+    nombreCliente: pedido.nombre_cliente,
+    direccion: pedido.direccion,
+    colonia: pedido.colonia,
+    municipio: pedido.municipio,
+    estadoDireccion: pedido.estado_direccion,
+    codigoPostal: pedido.codigo_postal,
+  });
+
+  if (resultadoPago.exito) {
+    await enviarMensaje(telefono,
+      `Tu pedido esta listo para confirmar!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\nTotal: $${total}\nSucursal: ${pedido.sucursal}\nDireccion: ${pedido.direccion}\n\nPara confirmar tu pedido realiza tu pago aqui:\n${resultadoPago.linkPago}\n\nTienes 15 minutos para completar el pago.`
+    );
+    // Recordatorio a los 10 minutos si sigue sin pagar
+    setTimeout(async () => {
+      const pedidoActual = (await db.obtenerPedidos(null, "gerente")).find(p => p.id === pedido.id);
+      if (pedidoActual && pedidoActual.estado === "pendiente_pago") {
+        await enviarMensaje(telefono,
+          `Recordatorio: tu pedido ${pedido.id} sigue esperando confirmacion de pago. Tienes 5 minutos mas antes de que se cancele.\n\n${resultadoPago.linkPago}`
+        );
+      }
+    }, 10 * 60 * 1000);
+    // Cancelar automaticamente a los 15 minutos si no ha pagado
+    setTimeout(async () => {
+      const pedidoActual = (await db.obtenerPedidos(null, "gerente")).find(p => p.id === pedido.id);
+      if (pedidoActual && pedidoActual.estado === "pendiente_pago") {
+        await db.actualizarEstadoPedido(pedido.id, "cancelado");
+        await enviarMensaje(telefono,
+          `Tu pedido ${pedido.id} fue cancelado por falta de pago. Si quieres intentar de nuevo, escribenos!`
+        );
+        logger.info(`Pedido ${pedido.id} cancelado automaticamente por falta de pago`);
+      }
+    }, 15 * 60 * 1000);
+  } else {
+    // Si falla la generacion del link, avisar y dejar pedido pendiente para revision manual
+    await enviarMensaje(telefono,
+      `Tu pedido fue registrado (ID: ${pedido.id}) pero tuvimos un problema generando el link de pago. Te contactaremos en breve para confirmar el pago.`
+    );
+    logger.error(`Fallo generacion de link de pago para ${pedido.id}: ${resultadoPago.error}`);
+  }
+}
+
 // ── Extrae items del historial con precios REALES del menu ────────────────────
 function extraerItemsConPreciosReales(historial) {
   const items = [];
@@ -350,91 +440,19 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       }
       logger.info(`Confirmacion: ${telefono} -> ${estado.sucursal_sugerida}`);
 
-      // Obtener items con precios reales
-      let items = estado.items || [];
-      if (items.length === 0) {
-        const historial = await db.obtenerHistorial(telefono);
-        items = extraerItemsConPreciosReales(historial);
-      }
-      // Verificar precios reales en todos los items
-      items = items.map(item => {
-        const real = buscarPlatillo(item.nombre);
-        return real ? { nombre: real.nombre, precio: real.precio, cantidad: item.cantidad || 1 } : item;
-      });
-
-      const pedido = {
-        id: `PED-${Date.now()}`,
-        fecha: new Date().toISOString(),
-        estado: "pendiente_pago",
-        telefono_cliente: telefono,
-        nombre_cliente: estado.nombre_cliente || null,
+      await crearPedidoDomicilioYPedirPago(telefono, {
         sucursal: estado.sucursal_sugerida,
-        items,
-        tipo: "domicilio",
-        direccion: estado.direccion || null,
-        colonia: estado.colonia || null,
-        municipio: estado.municipio || null,
-        estado_direccion: estado.estado_direccion || null,
-        codigo_postal: estado.codigo_postal || null,
-        referencias: estado.referencias || null,
-        ubicacion_gps: estado.coords ? {
-          latitude: estado.coords.lat,
-          longitude: estado.coords.lng,
-          maps_url: estado.maps_url || `https://maps.google.com/?q=${estado.coords.lat},${estado.coords.lng}`
-        } : null,
-      };
-      await db.guardarPedido(pedido);
-      await db.eliminarEstadoPedido(telefono);
-      await db.guardarHistorial(telefono, []);
-      logger.info(`Pedido pre-registrado (pendiente de pago): ${pedido.id} -> ${pedido.sucursal}`);
-
-      const total = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
-      const itemsTexto = items.map(i => `${i.cantidad || 1}x ${i.nombre} ($${i.precio})`).join("\n");
-
-      // Generar link de pago con Netpay
-      const resultadoPago = await generarLinkPago({
-        items,
-        referencia: pedido.id,
-        telefono: telefono,
-        nombreCliente: pedido.nombre_cliente,
-        direccion: pedido.direccion,
-        colonia: pedido.colonia,
-        municipio: pedido.municipio,
-        estadoDireccion: pedido.estado_direccion,
-        codigoPostal: pedido.codigo_postal,
+        items: estado.items,
+        nombreCliente: estado.nombre_cliente,
+        direccion: estado.direccion,
+        colonia: estado.colonia,
+        municipio: estado.municipio,
+        estadoDireccion: estado.estado_direccion,
+        codigoPostal: estado.codigo_postal,
+        referencias: estado.referencias,
+        coords: estado.coords,
+        mapsUrl: estado.maps_url,
       });
-
-      if (resultadoPago.exito) {
-        await enviarMensaje(telefono,
-          `Tu pedido esta listo para confirmar!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\nTotal: $${total}\nSucursal: ${estado.sucursal_sugerida}\nDireccion: ${estado.direccion}\n\nPara confirmar tu pedido realiza tu pago aqui:\n${resultadoPago.linkPago}\n\nTienes 15 minutos para completar el pago.`
-        );
-        // Recordatorio a los 10 minutos si sigue sin pagar
-        setTimeout(async () => {
-          const pedidoActual = (await db.obtenerPedidos(null, "gerente")).find(p => p.id === pedido.id);
-          if (pedidoActual && pedidoActual.estado === "pendiente_pago") {
-            await enviarMensaje(telefono,
-              `Recordatorio: tu pedido ${pedido.id} sigue esperando confirmacion de pago. Tienes 5 minutos mas antes de que se cancele.\n\n${resultadoPago.linkPago}`
-            );
-          }
-        }, 10 * 60 * 1000);
-        // Cancelar automaticamente a los 15 minutos si no ha pagado
-        setTimeout(async () => {
-          const pedidoActual = (await db.obtenerPedidos(null, "gerente")).find(p => p.id === pedido.id);
-          if (pedidoActual && pedidoActual.estado === "pendiente_pago") {
-            await db.actualizarEstadoPedido(pedido.id, "cancelado");
-            await enviarMensaje(telefono,
-              `Tu pedido ${pedido.id} fue cancelado por falta de pago. Si quieres intentar de nuevo, escribenos!`
-            );
-            logger.info(`Pedido ${pedido.id} cancelado automaticamente por falta de pago`);
-          }
-        }, 15 * 60 * 1000);
-      } else {
-        // Si falla la generacion del link, avisar y dejar pedido pendiente para revision manual
-        await enviarMensaje(telefono,
-          `Tu pedido fue registrado (ID: ${pedido.id}) pero tuvimos un problema generando el link de pago. Te contactaremos en breve para confirmar el pago.`
-        );
-        logger.error(`Fallo generacion de link de pago para ${pedido.id}: ${resultadoPago.error}`);
-      }
       return;
     }
 
@@ -475,36 +493,47 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         return;
       }
 
-      const sucursalSugerida = resolucion.sucursal || "Por confirmar";
-      logger.info(`Direccion validada: "${dirFinal}" -> Zona: ${sucursalSugerida}`);
-
-      await db.guardarEstadoPedido(telefono, {
-        ...estado,
-        fase: "esperando_confirmacion_sucursal",
-        sucursal_sugerida: sucursalSugerida,
-        direccion: dirFinal,
-        colonia: geoResult.colonia || null,
-        municipio: geoResult.municipio || null,
-        estado_direccion: geoResult.estado || null,
-        codigo_postal: geoResult.codigoPostal || null,
-        coords: geoResult.coords || null,
-        maps_url: geoResult.maps_url || null,
-      });
-
-      if (resolucion.cambio) {
-        // La sucursal por zona quedaba fuera de rango; se ofrece la real mas cercana.
-        await enviarMensaje(telefono,
-          `Direccion confirmada: ${dirFinal}\n\n${zona ? `La sucursal de tu zona (${zona}) queda un poco lejos, pero ` : ""}*${sucursalSugerida}* si te puede atender dentro de nuestro rango de entrega. Te enviamos desde ahi o prefieres otra?`
-        );
-      } else if (resolucion.sucursal) {
-        await enviarMensaje(telefono,
-          `Direccion confirmada: ${dirFinal}\n\nLa sucursal mas cercana a tu zona es *${sucursalSugerida}*. Te enviamos desde ahi o prefieres otra?`
-        );
-      } else {
+      // CORREGIDO: ya no se pregunta "te enviamos desde ahi o prefieres otra?"
+      // -- en cuanto se sabe la sucursal que va a atender (la de la zona si
+      // quedo dentro del rango de entrega, o la real mas cercana si no), se
+      // crea el pedido y se manda el link de pago directo. Solo se pregunta
+      // en el caso raro donde el sistema no pudo determinar ninguna sucursal
+      // (ni por zona ni por distancia -- ej. faltan coordenadas geocodificadas).
+      if (!resolucion.sucursal) {
+        await db.guardarEstadoPedido(telefono, {
+          ...estado,
+          fase: "esperando_confirmacion_sucursal",
+          sucursal_sugerida: null,
+          direccion: dirFinal,
+          colonia: geoResult.colonia || null,
+          municipio: geoResult.municipio || null,
+          estado_direccion: geoResult.estado || null,
+          codigo_postal: geoResult.codigoPostal || null,
+          coords: geoResult.coords || null,
+          maps_url: geoResult.maps_url || null,
+        });
         await enviarMensaje(telefono,
           `Direccion confirmada: ${dirFinal}\n\nCual sucursal prefieres? Tenemos: ${listaNombres(await obtenerSucursalesActivas())}`
         );
+        return;
       }
+
+      const sucursalSugerida = resolucion.sucursal;
+      logger.info(`Direccion validada: "${dirFinal}" -> Sucursal asignada: ${sucursalSugerida}${resolucion.cambio ? ` (zona detectada "${zona}" quedaba fuera de rango)` : ""}`);
+
+      await crearPedidoDomicilioYPedirPago(telefono, {
+        sucursal: sucursalSugerida,
+        items: estado.items,
+        nombreCliente: estado.nombre_cliente,
+        direccion: dirFinal,
+        colonia: geoResult.colonia || null,
+        municipio: geoResult.municipio || null,
+        estadoDireccion: geoResult.estado || null,
+        codigoPostal: geoResult.codigoPostal || null,
+        referencias: estado.referencias,
+        coords: geoResult.coords || null,
+        mapsUrl: geoResult.maps_url || null,
+      });
       return;
     }
 
@@ -546,31 +575,28 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
           return;
         }
 
+        // CORREGIDO: igual que en CASO 2, ya no se pregunta "te enviamos desde
+        // ahi o prefieres otra?" -- se crea el pedido directo con la sucursal
+        // que quedo asignada (por zona si entraba en rango, o la real mas
+        // cercana si no). Dentro de este bloque (zona detectada) resolucion.sucursal
+        // siempre viene con valor, ya que el caso "sin ninguna sucursal disponible"
+        // ya se filtro arriba con el chequeo de dentroDeRadio.
         const sucursalFinal = resolucion.sucursal;
+        logger.info(`Direccion + domicilio en mismo mensaje: "${dirFinal}" -> Sucursal asignada: ${sucursalFinal}${resolucion.cambio ? ` (zona detectada "${zona}" quedaba fuera de rango)` : ""}, items: ${items.length}`);
 
-        await db.guardarEstadoPedido(telefono, {
-          fase: "esperando_confirmacion_sucursal",
-          sucursal_sugerida: sucursalFinal,
+        await crearPedidoDomicilioYPedirPago(telefono, {
+          sucursal: sucursalFinal,
           items,
+          nombreCliente: estado?.nombre_cliente || null,
           direccion: dirFinal,
           colonia: geoResult.colonia || null,
           municipio: geoResult.municipio || null,
-          estado_direccion: geoResult.estado || null,
-          codigo_postal: geoResult.codigoPostal || null,
+          estadoDireccion: geoResult.estado || null,
+          codigoPostal: geoResult.codigoPostal || null,
+          referencias: estado?.referencias || null,
           coords: geoResult.coords || null,
-          maps_url: geoResult.maps_url || null,
+          mapsUrl: geoResult.maps_url || null,
         });
-        logger.info(`Estado guardado (caso3): ${sucursalFinal}, items: ${items.length}`);
-
-        if (resolucion.cambio) {
-          await enviarMensaje(telefono,
-            `Direccion confirmada: ${dirFinal}\n\nLa sucursal de tu zona (${zona}) queda un poco lejos, pero *${sucursalFinal}* si te puede atender dentro de nuestro rango de entrega. Te enviamos desde ahi o prefieres otra?`
-          );
-        } else {
-          await enviarMensaje(telefono,
-            `Direccion confirmada: ${dirFinal}\n\nLa sucursal mas cercana a tu zona es *${sucursalFinal}*. Te enviamos desde ahi o prefieres otra?`
-          );
-        }
         return;
       }
     }
