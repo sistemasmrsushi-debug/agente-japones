@@ -493,47 +493,32 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         return;
       }
 
-      // CORREGIDO: ya no se pregunta "te enviamos desde ahi o prefieres otra?"
-      // -- en cuanto se sabe la sucursal que va a atender (la de la zona si
-      // quedo dentro del rango de entrega, o la real mas cercana si no), se
-      // crea el pedido y se manda el link de pago directo. Solo se pregunta
-      // en el caso raro donde el sistema no pudo determinar ninguna sucursal
-      // (ni por zona ni por distancia -- ej. faltan coordenadas geocodificadas).
-      if (!resolucion.sucursal) {
-        await db.guardarEstadoPedido(telefono, {
-          ...estado,
-          fase: "esperando_confirmacion_sucursal",
-          sucursal_sugerida: null,
-          direccion: dirFinal,
-          colonia: geoResult.colonia || null,
-          municipio: geoResult.municipio || null,
-          estado_direccion: geoResult.estado || null,
-          codigo_postal: geoResult.codigoPostal || null,
-          coords: geoResult.coords || null,
-          maps_url: geoResult.maps_url || null,
-        });
-        await enviarMensaje(telefono,
-          `Direccion confirmada: ${dirFinal}\n\nCual sucursal prefieres? Tenemos: ${listaNombres(await obtenerSucursalesActivas())}`
-        );
-        return;
-      }
-
-      const sucursalSugerida = resolucion.sucursal;
-      logger.info(`Direccion validada: "${dirFinal}" -> Sucursal asignada: ${sucursalSugerida}${resolucion.cambio ? ` (zona detectada "${zona}" quedaba fuera de rango)` : ""}`);
-
-      await crearPedidoDomicilioYPedirPago(telefono, {
-        sucursal: sucursalSugerida,
-        items: estado.items,
-        nombreCliente: estado.nombre_cliente,
+      // Se pregunta siempre cual sucursal usar (aunque el sistema ya sepa cual
+      // es la mas cercana) -- el mensaje ya no explica "queda un poco lejos" ni
+      // distingue casos, nada mas informa la sucursal mas cercana y pregunta.
+      await db.guardarEstadoPedido(telefono, {
+        ...estado,
+        fase: "esperando_confirmacion_sucursal",
+        sucursal_sugerida: resolucion.sucursal || null,
         direccion: dirFinal,
         colonia: geoResult.colonia || null,
         municipio: geoResult.municipio || null,
-        estadoDireccion: geoResult.estado || null,
-        codigoPostal: geoResult.codigoPostal || null,
-        referencias: estado.referencias,
+        estado_direccion: geoResult.estado || null,
+        codigo_postal: geoResult.codigoPostal || null,
         coords: geoResult.coords || null,
-        mapsUrl: geoResult.maps_url || null,
+        maps_url: geoResult.maps_url || null,
       });
+
+      if (resolucion.sucursal) {
+        logger.info(`Direccion validada: "${dirFinal}" -> Sucursal sugerida: ${resolucion.sucursal}${resolucion.cambio ? ` (zona detectada "${zona}" quedaba fuera de rango)` : ""}`);
+        await enviarMensaje(telefono,
+          `Direccion confirmada: ${dirFinal}\n\nTu sucursal mas cercana es *${resolucion.sucursal}*. Te enviamos desde ahi o prefieres otra?`
+        );
+      } else {
+        await enviarMensaje(telefono,
+          `Direccion confirmada: ${dirFinal}\n\nCual sucursal prefieres? Tenemos: ${listaNombres(await obtenerSucursalesActivas())}`
+        );
+      }
       return;
     }
 
@@ -575,28 +560,29 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
           return;
         }
 
-        // CORREGIDO: igual que en CASO 2, ya no se pregunta "te enviamos desde
-        // ahi o prefieres otra?" -- se crea el pedido directo con la sucursal
-        // que quedo asignada (por zona si entraba en rango, o la real mas
-        // cercana si no). Dentro de este bloque (zona detectada) resolucion.sucursal
-        // siempre viene con valor, ya que el caso "sin ninguna sucursal disponible"
-        // ya se filtro arriba con el chequeo de dentroDeRadio.
+        // Dentro de este bloque (zona detectada) resolucion.sucursal siempre
+        // viene con valor, ya que el caso "sin ninguna sucursal disponible" ya
+        // se filtro arriba con el chequeo de dentroDeRadio. Se pregunta igual
+        // que en CASO 2 -- informa la mas cercana y pregunta, sin explicar
+        // "queda un poco lejos".
         const sucursalFinal = resolucion.sucursal;
-        logger.info(`Direccion + domicilio en mismo mensaje: "${dirFinal}" -> Sucursal asignada: ${sucursalFinal}${resolucion.cambio ? ` (zona detectada "${zona}" quedaba fuera de rango)` : ""}, items: ${items.length}`);
+        logger.info(`Direccion + domicilio en mismo mensaje: "${dirFinal}" -> Sucursal sugerida: ${sucursalFinal}${resolucion.cambio ? ` (zona detectada "${zona}" quedaba fuera de rango)` : ""}, items: ${items.length}`);
 
-        await crearPedidoDomicilioYPedirPago(telefono, {
-          sucursal: sucursalFinal,
+        await db.guardarEstadoPedido(telefono, {
+          fase: "esperando_confirmacion_sucursal",
+          sucursal_sugerida: sucursalFinal,
           items,
-          nombreCliente: estado?.nombre_cliente || null,
           direccion: dirFinal,
           colonia: geoResult.colonia || null,
           municipio: geoResult.municipio || null,
-          estadoDireccion: geoResult.estado || null,
-          codigoPostal: geoResult.codigoPostal || null,
-          referencias: estado?.referencias || null,
+          estado_direccion: geoResult.estado || null,
+          codigo_postal: geoResult.codigoPostal || null,
           coords: geoResult.coords || null,
-          mapsUrl: geoResult.maps_url || null,
+          maps_url: geoResult.maps_url || null,
         });
+        await enviarMensaje(telefono,
+          `Direccion confirmada: ${dirFinal}\n\nTu sucursal mas cercana es *${sucursalFinal}*. Te enviamos desde ahi o prefieres otra?`
+        );
         return;
       }
     }
