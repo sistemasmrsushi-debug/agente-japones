@@ -39,6 +39,25 @@ async function enviarAlertaGerente(texto) {
   await enviarMensaje(`whatsapp:${telefono}`, `⚠️ ALERTA Mr. Sushi\n\n${texto}`);
 }
 
+// CONFIRMADO (23-ago-2026, con diagnosticar_uber.js): el "failed to create
+// location" que fallaba en TODAS las entregas a domicilio no era por la
+// direccion -- era el TELEFONO de la sucursal. config/restaurante.js guarda
+// varias sucursales con dos numeros en el mismo campo separados por "/" y
+// sin codigo de pais (ej. "55 5393 0232 / 55 5572 3088"), y Uber Direct
+// rechaza ese formato ("pickup phone number is not valid"). Esta funcion
+// toma solo el primer numero y lo convierte a formato E.164 (+52...).
+function formatearTelefonoUber(telefono) {
+  if (!telefono) return "";
+  const primerNumero = telefono.split("/")[0].trim();
+  const soloDigitos = primerNumero.replace(/\D/g, "");
+  if (!soloDigitos) return "";
+  // Numero local mexicano de 10 digitos -- anteponer codigo de pais 52. Si ya
+  // trae codigo de pais (11+ digitos, como los que llegan de WhatsApp), se
+  // deja tal cual.
+  const conCodigoPais = soloDigitos.length === 10 ? `52${soloDigitos}` : soloDigitos;
+  return `+${conCodigoPais}`;
+}
+
 // Arma los datos de recoleccion (la sucursal) y entrega (el domicilio del
 // cliente, ya validado con Google Maps) y crea la entrega en Uber Direct.
 async function despacharUberDirect(pedido) {
@@ -58,7 +77,7 @@ async function despacharUberDirect(pedido) {
     const pickup = {
       nombre: sucursal.nombre,
       calle: sucursal.direccion,
-      telefono: sucursal.telefono,
+      telefono: formatearTelefonoUber(sucursal.telefono),
       lat: Number(sucursal.lat),
       lng: Number(sucursal.lng),
     };
@@ -74,7 +93,7 @@ async function despacharUberDirect(pedido) {
     const dropoff = {
       nombre: pedido.nombre_cliente || "Cliente Mr. Sushi",
       calle: pedido.direccion,
-      telefono: (pedido.telefono_cliente || "").replace("whatsapp:", ""),
+      telefono: formatearTelefonoUber((pedido.telefono_cliente || "").replace("whatsapp:", "")),
       lat: pedido.ubicacion_gps.latitude,
       lng: pedido.ubicacion_gps.longitude,
     };
