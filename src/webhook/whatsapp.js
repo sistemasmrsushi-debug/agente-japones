@@ -206,14 +206,14 @@ async function crearPedidoDomicilioYPedirPago(telefono, opts) {
 
   if (resultadoPago.exito) {
     await enviarMensaje(telefono,
-      `Tu pedido esta listo para confirmar!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\nTotal: $${total}\nSucursal: ${pedido.sucursal}\nDireccion: ${pedido.direccion}\n\nPara confirmar tu pedido realiza tu pago aqui:\n${resultadoPago.linkPago}\n\nTienes 15 minutos para completar el pago.`
+      `🍣 ¡Tu pedido está listo para confirmar!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\nTotal: $${total}\nSucursal: ${pedido.sucursal}\nDirección: ${pedido.direccion}\n\n💳 Para confirmar tu pedido realiza tu pago aquí:\n${resultadoPago.linkPago}\n\n⏱️ Tienes 15 minutos para completar el pago.`
     );
     // Recordatorio a los 10 minutos si sigue sin pagar
     setTimeout(async () => {
       const pedidoActual = (await db.obtenerPedidos(null, "gerente")).find(p => p.id === pedido.id);
       if (pedidoActual && pedidoActual.estado === "pendiente_pago") {
         await enviarMensaje(telefono,
-          `Recordatorio: tu pedido ${pedido.id} sigue esperando confirmacion de pago. Tienes 5 minutos mas antes de que se cancele.\n\n${resultadoPago.linkPago}`
+          `⏱️ Recordatorio: tu pedido ${pedido.id} sigue esperando confirmación de pago. Tienes 5 minutos más antes de que se cancele.\n\n${resultadoPago.linkPago}`
         );
       }
     }, 10 * 60 * 1000);
@@ -223,7 +223,7 @@ async function crearPedidoDomicilioYPedirPago(telefono, opts) {
       if (pedidoActual && pedidoActual.estado === "pendiente_pago") {
         await db.actualizarEstadoPedido(pedido.id, "cancelado");
         await enviarMensaje(telefono,
-          `Tu pedido ${pedido.id} fue cancelado por falta de pago. Si quieres intentar de nuevo, escribenos!`
+          `Tu pedido ${pedido.id} fue cancelado por falta de pago. Si quieres intentar de nuevo, ¡escríbenos! 🍣`
         );
         logger.info(`Pedido ${pedido.id} cancelado automaticamente por falta de pago`);
       }
@@ -283,7 +283,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         latitude: lat, longitude: lng,
         maps_url: `https://maps.google.com/?q=${lat},${lng}`
       });
-      await enviarMensaje(telefono, "Ubicacion recibida! Ya la guardamos para la entrega.");
+      await enviarMensaje(telefono, "📍 ¡Ubicación recibida! Ya la guardamos para la entrega.");
       return;
     }
 
@@ -324,7 +324,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         // corriendo desde la creacion original del pedido) -- el cliente
         // conserva el mismo limite total de 15 minutos que ya se le informo.
         await enviarMensaje(telefono,
-          `Aqui tienes un nuevo link de pago para tu pedido ${pedidoPendiente.id}:\n${resultadoPago.linkPago}`
+          `💳 Aquí tienes un nuevo link de pago para tu pedido ${pedidoPendiente.id}:\n${resultadoPago.linkPago}`
         );
         logger.info(`Nuevo link de pago generado (reintento) para ${pedidoPendiente.id}`);
       } else {
@@ -512,7 +512,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       if (resolucion.sucursal) {
         logger.info(`Direccion validada: "${dirFinal}" -> Sucursal sugerida: ${resolucion.sucursal}${resolucion.cambio ? ` (zona detectada "${zona}" quedaba fuera de rango)` : ""}`);
         await enviarMensaje(telefono,
-          `Direccion confirmada: ${dirFinal}\n\nTu sucursal mas cercana es *${resolucion.sucursal}*. Te enviamos desde ahi o prefieres otra?`
+          `📍 Dirección confirmada: ${dirFinal}\n\nTu sucursal más cercana es *${resolucion.sucursal}* 🍣. ¿Te enviamos desde ahí o prefieres otra?`
         );
       } else {
         await enviarMensaje(telefono,
@@ -582,7 +582,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
           maps_url: geoResult.maps_url || null,
         });
         await enviarMensaje(telefono,
-          `Direccion confirmada: ${dirFinal}\n\nTu sucursal mas cercana es *${sucursalFinal}*. Te enviamos desde ahi o prefieres otra?`
+          `📍 Dirección confirmada: ${dirFinal}\n\nTu sucursal más cercana es *${sucursalFinal}* 🍣. ¿Te enviamos desde ahí o prefieres otra?`
         );
         return;
       }
@@ -593,7 +593,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
     const pideMenu = /\b(menu|carta|platillos|que tienen|que ofrecen|ver menu|mostrar menu)\b/.test(msgNorm);
     if (pideMenu) {
       logger.info(`Cliente pidio menu -> enviando PDF directo`);
-      await enviarMensaje(telefono, "Claro! Aqui tienes nuestro menu completo:");
+      await enviarMensaje(telefono, "🍣 ¡Claro! Aquí tienes nuestro menú completo:");
       await enviarMenuPDF(telefono);
       return;
     }
@@ -741,7 +741,7 @@ async function ejecutarAccion(accion, datos, telefono) {
 
         if (resultadoPago.exito) {
           await enviarMensaje(telefono,
-            `Tu pedido esta listo para confirmar!\n\nID: ${pedido.id}\n\n${itemsTextoDomicilio}\n\nTotal: $${totalDomicilio}\nSucursal: ${pedido.sucursal}\nDireccion: ${pedido.direccion}\n\nPara confirmar tu pedido realiza tu pago aqui:\n${resultadoPago.linkPago}\n\nTienes 15 minutos para completar el pago.`
+            `🍣 ¡Tu pedido está listo para confirmar!\n\nID: ${pedido.id}\n\n${itemsTextoDomicilio}\n\nTotal: $${totalDomicilio}\nSucursal: ${pedido.sucursal}\nDirección: ${pedido.direccion}\n\n💳 Para confirmar tu pedido realiza tu pago aquí:\n${resultadoPago.linkPago}\n\n⏱️ Tienes 15 minutos para completar el pago.`
           );
         } else {
           await enviarMensaje(telefono,
@@ -772,7 +772,7 @@ async function ejecutarAccion(accion, datos, telefono) {
       const total = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
       const itemsTexto = items.map(i => `${i.cantidad || 1}x ${i.nombre} ($${i.precio})`).join("\n");
       await enviarMensaje(telefono,
-        `Pedido registrado!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\nTotal: $${total}\nSucursal: ${pedido.sucursal}\n\nTiempo: ~40 min.`
+        `🍣 ¡Pedido registrado!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\nTotal: $${total}\nSucursal: ${pedido.sucursal}\n\n⏱️ Tiempo: ~40 min.`
       );
     } else if (accion === "REGISTRAR_RESERVACION") {
       const reservacion = {

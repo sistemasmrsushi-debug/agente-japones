@@ -48,11 +48,11 @@ async function despacharUberDirect(pedido) {
 
     if (!sucursal || !sucursal.lat || !sucursal.lng) {
       logger.warn(`No se pudo despachar Uber Direct para ${pedido.id}: sucursal "${pedido.sucursal}" sin coordenadas registradas. Corre el script de geocodificacion de sucursales.`);
-      return;
+      return { exito: false };
     }
     if (!pedido.ubicacion_gps?.latitude) {
       logger.warn(`No se pudo despachar Uber Direct para ${pedido.id}: el pedido no tiene coordenadas de domicilio guardadas.`);
-      return;
+      return { exito: false };
     }
 
     const pickup = {
@@ -105,16 +105,17 @@ async function despacharUberDirect(pedido) {
         estadoUber: resultado.estado,
       });
       logger.info(`Entrega de Uber Direct creada para ${pedido.id}: deliveryId=${resultado.deliveryId}`);
-      if (pedido.telefono_cliente && resultado.trackingUrl) {
-        await enviarMensaje(pedido.telefono_cliente,
-          `Ya estamos buscando un repartidor para tu pedido. Puedes seguirlo aqui:\n${resultado.trackingUrl}`
-        );
-      }
-    } else {
-      logger.error(`Fallo al crear entrega de Uber Direct para ${pedido.id}: ${resultado.error}`);
+      // CORREGIDO: ya no manda su propio mensaje aqui -- regresa el resultado
+      // para que el caller (el handler de sessionLink.paid) lo combine con el
+      // mensaje de "pago confirmado" en un solo WhatsApp, en vez de dos
+      // mensajes seguidos.
+      return { exito: true, trackingUrl: resultado.trackingUrl || null };
     }
+    logger.error(`Fallo al crear entrega de Uber Direct para ${pedido.id}: ${resultado.error}`);
+    return { exito: false };
   } catch (error) {
     logger.error(`Error inesperado despachando Uber Direct para ${pedido.id}: ${error.message}`);
+    return { exito: false };
   }
 }
 
@@ -178,15 +179,23 @@ router.post("/webhook/netpay", async (req, res) => {
           await db.marcarPedidoPagado(referenciaPedido);
           logger.info(`Pedido ${referenciaPedido} marcado como pagado`);
 
+          // CORREGIDO: para domicilio, se espera el resultado de Uber Direct
+          // ANTES de mandar el mensaje, para combinar todo en un solo
+          // WhatsApp (antes se mandaban dos mensajes seguidos: confirmacion
+          // de pago, y luego por separado el aviso de repartidor).
           if (pedido?.telefono_cliente) {
-            await enviarMensaje(pedido.telefono_cliente,
-              `Pago confirmado! Tu pedido ${referenciaPedido} esta siendo preparado.\nTarjeta terminacion ${lastFourDigits || "****"}.\nTiempo estimado: 40 minutos.`
-            );
-          }
+            let mensajePago = `🍣 ¡Pago confirmado! Tu pedido ${referenciaPedido} ya está en preparación.\n💳 Tarjeta terminación ${lastFourDigits || "****"}.\n⏱️ Tiempo estimado: 40 minutos.`;
 
-          // Despachar repartidor de Uber Direct automaticamente, solo para
-          // pedidos a domicilio (los de recoger en sucursal no aplican).
-          if (pedido?.tipo === "domicilio") {
+            if (pedido.tipo === "domicilio") {
+              const resultadoUber = await despacharUberDirect(pedido);
+              mensajePago += resultadoUber.trackingUrl
+                ? `\n\n🛵 Ya estamos buscando tu repartidor. Puedes seguirlo aquí:\n${resultadoUber.trackingUrl}`
+                : `\n\n🛵 En breve te compartimos el link para seguir a tu repartidor.`;
+            }
+
+            await enviarMensaje(pedido.telefono_cliente, mensajePago);
+          } else if (pedido?.tipo === "domicilio") {
+            // Sin telefono no hay a quien avisar, pero igual se despacha.
             await despacharUberDirect(pedido);
           }
         }
@@ -212,7 +221,7 @@ router.post("/webhook/netpay", async (req, res) => {
           const pedido = pedidos.find(p => p.id === merchantRefCode);
           if (pedido?.telefono_cliente) {
             await enviarMensaje(pedido.telefono_cliente,
-              `Tu pago no pudo procesarse. Quieres intentar con otra tarjeta? Responde "reintentar pago" y te mandamos un nuevo link.`
+              `😕 Tu pago no pudo procesarse. ¿Quieres intentar con otra tarjeta? Responde "reintentar pago" y te mandamos un nuevo link.`
             );
           }
         }
