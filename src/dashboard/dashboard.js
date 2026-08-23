@@ -17,9 +17,9 @@ function getMensajeSeguimiento(estado, pedido) {
   const items = Array.isArray(pedido.items)
     ? pedido.items.map(i => `- ${i.cantidad||1}x ${i.nombre}`).join("\n") : "";
   const msgs = {
-    en_proceso: `Mr. Sushi - Tu pedido esta en preparacion\n\nHola! Tu pedido en ${sucursal} ya esta en preparacion.\n\n${items}\n\nGracias por tu paciencia!`,
-    listo:      `Mr. Sushi - Tu pedido esta listo!\n\nHola! Tu pedido en ${sucursal} ya esta listo.\n\n${items}\n\nTe esperamos!`,
-    cancelado:  `Mr. Sushi - Pedido cancelado\n\nLo sentimos, tu pedido en ${sucursal} fue cancelado.\n\nSi tienes dudas contactanos directamente.`,
+    en_proceso: `🍣 Mr. Sushi - Tu pedido está en preparación\n\n¡Hola! Tu pedido en ${sucursal} ya está en preparación. 👨‍🍳\n\n${items}\n\n¡Gracias por tu paciencia!`,
+    listo:      `✅ Mr. Sushi - ¡Tu pedido está listo!\n\n¡Hola! Tu pedido en ${sucursal} ya está listo.\n\n${items}\n\n¡Te esperamos! 🍣`,
+    cancelado:  `😕 Mr. Sushi - Pedido cancelado\n\nLo sentimos, tu pedido en ${sucursal} fue cancelado.\n\nSi tienes dudas contáctanos directamente.`,
   };
   return msgs[estado] || null;
 }
