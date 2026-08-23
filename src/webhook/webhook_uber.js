@@ -46,13 +46,19 @@ function firmaValida(cuerpoCrudo, firmaRecibida) {
 // Mensajes amigables por estatus para el cliente. Los nombres exactos de status
 // que manda Uber se confirman con la primera prueba real (la documentacion no
 // siempre coincide al 100% con la respuesta real, como ya nos paso con Netpay).
+// CORREGIDO: se quitaron las notificaciones de los estatus intermedios
+// (pickup, pickup_complete, dropoff) -- son redundantes porque el cliente ya
+// recibe el link de seguimiento de Uber en el mensaje de pago confirmado, y
+// ahi puede ver el mismo avance en tiempo real. Solo se avisan los dos
+// estatus que SI requieren accion/atencion del cliente: que ya se entrego, o
+// que hubo un problema y se cancelo.
 const MENSAJES_ESTATUS = {
   "pending": null, // aun no hay repartidor asignado, no vale la pena notificar
-  "pickup": "Un repartidor de Uber ya va en camino a recoger tu pedido.",
-  "pickup_complete": "Tu pedido ya fue recogido por el repartidor y va en camino.",
-  "dropoff": "El repartidor esta llegando a tu domicilio.",
-  "delivered": "Tu pedido fue entregado. Buen provecho!",
-  "canceled": "Hubo un problema con el repartidor y la entrega se cancelo. Nos pondremos en contacto contigo.",
+  "pickup": null, // ya visible en el link de seguimiento de Uber
+  "pickup_complete": null, // ya visible en el link de seguimiento de Uber
+  "dropoff": null, // ya visible en el link de seguimiento de Uber
+  "delivered": "🍣 ¡Tu pedido fue entregado! Buen provecho.",
+  "canceled": "😕 Hubo un problema con el repartidor y la entrega se canceló. Nos pondremos en contacto contigo.",
 };
 
 // NOTA IMPORTANTE: index.js ya usa express.json() de forma GLOBAL para todas
