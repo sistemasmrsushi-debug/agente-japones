@@ -651,13 +651,20 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
 
     // Si el agente registro pedido directamente
     if (resultado.accion === "REGISTRAR_PEDIDO") {
+      // CORREGIDO: antes se mandaban DOS mensajes seguidos cuando la IA
+      // registraba el pedido directamente -- el texto de despedida de la IA
+      // ("¡Perfecto! Tu pedido esta registrado... ¡Gracias!") Y, aparte, el
+      // mensaje real de ejecutarAccion con el ID/detalle/link de pago. Ese
+      // primer mensaje era pura redundancia (ejecutarAccion ya manda el
+      // mensaje definitivo), asi que ya no se envia resultado.texto en este caso.
       await ejecutarAccion(resultado.accion, resultado.datos, telefono);
       await db.eliminarEstadoPedido(telefono);
-    } else if (resultado.accion === "REGISTRAR_RESERVACION" || resultado.accion === "ESCALAR_HUMANO") {
-      await ejecutarAccion(resultado.accion, resultado.datos, telefono);
+    } else {
+      if (resultado.accion === "REGISTRAR_RESERVACION" || resultado.accion === "ESCALAR_HUMANO") {
+        await ejecutarAccion(resultado.accion, resultado.datos, telefono);
+      }
+      await enviarMensaje(telefono, resultado.texto);
     }
-
-    await enviarMensaje(telefono, resultado.texto);
 
   } catch (error) {
     logger.error("Error webhook: " + error.message);
