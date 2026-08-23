@@ -127,6 +127,27 @@ async function initDB() {
         actualizado TIMESTAMPTZ DEFAULT NOW()
       );
     `);
+    // Memoria de la ultima direccion de domicilio usada por cada telefono, para
+    // poder ofrecerla en pedidos futuros ("¿enviamos a tu direccion de
+    // siempre?") en vez de pedirla desde cero cada vez. Se actualiza cada vez
+    // que un pedido a domicilio se crea con exito (ver crearPedidoDomicilioYPedirPago
+    // y el registro directo por IA en whatsapp.js) -- siempre con la direccion
+    // MAS RECIENTE, para que si el cliente se muda, la sugerencia se actualice sola.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS clientes (
+        telefono TEXT PRIMARY KEY,
+        nombre TEXT,
+        direccion TEXT,
+        colonia TEXT,
+        municipio TEXT,
+        estado_direccion TEXT,
+        codigo_postal TEXT,
+        lat NUMERIC,
+        lng NUMERIC,
+        maps_url TEXT,
+        actualizado TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
     logger.info("Base de datos inicializada correctamente");
   } catch (err) {
     logger.error("Error inicializando DB: " + err.message);
@@ -253,6 +274,41 @@ async function actualizarGPSPedido(telefono, ubicacion) {
     WHERE telefono_cliente=$2 AND tipo='domicilio'
     AND fecha = (SELECT MAX(fecha) FROM pedidos WHERE telefono_cliente=$2 AND tipo='domicilio')
   `, [JSON.stringify(ubicacion), telefono]);
+}
+
+// ── CLIENTES (memoria de direccion para pedidos futuros) ──────────────────────
+async function guardarClienteDireccion(telefono, datos) {
+  await pool.query(`
+    INSERT INTO clientes (telefono, nombre, direccion, colonia, municipio, estado_direccion, codigo_postal, lat, lng, maps_url, actualizado)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+    ON CONFLICT (telefono) DO UPDATE SET
+      nombre = COALESCE(EXCLUDED.nombre, clientes.nombre),
+      direccion = EXCLUDED.direccion,
+      colonia = EXCLUDED.colonia,
+      municipio = EXCLUDED.municipio,
+      estado_direccion = EXCLUDED.estado_direccion,
+      codigo_postal = EXCLUDED.codigo_postal,
+      lat = EXCLUDED.lat,
+      lng = EXCLUDED.lng,
+      maps_url = EXCLUDED.maps_url,
+      actualizado = NOW()
+  `, [
+    telefono,
+    datos.nombre || null,
+    datos.direccion || null,
+    datos.colonia || null,
+    datos.municipio || null,
+    datos.estado_direccion || null,
+    datos.codigo_postal || null,
+    datos.lat || null,
+    datos.lng || null,
+    datos.maps_url || null,
+  ]);
+}
+
+async function obtenerClientePorTelefono(telefono) {
+  const { rows } = await pool.query("SELECT * FROM clientes WHERE telefono = $1", [telefono]);
+  return rows[0] || null;
 }
 
 async function obtenerStatsPedidos() {
@@ -533,6 +589,8 @@ module.exports = {
   actualizarEstadoPedido,
   marcarPedidoPagado,
   actualizarGPSPedido,
+  guardarClienteDireccion,
+  obtenerClientePorTelefono,
   guardarEntregaUber,
   actualizarEstadoUber,
   obtenerPedidoPorUberDeliveryId,

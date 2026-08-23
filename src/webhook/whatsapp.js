@@ -232,6 +232,23 @@ async function crearPedidoDomicilioYPedirPago(telefono, opts) {
   await db.guardarHistorial(telefono, []);
   logger.info(`Pedido pre-registrado (pendiente de pago): ${pedido.id} -> ${pedido.sucursal}`);
 
+  // Recordar esta direccion para el proximo pedido del mismo telefono (ver
+  // tabla "clientes"). No bloquea el flujo si falla -- es una mejora de
+  // conveniencia, no algo critico para completar el pedido actual.
+  if (pedido.direccion) {
+    db.guardarClienteDireccion(telefono, {
+      nombre: pedido.nombre_cliente,
+      direccion: pedido.direccion,
+      colonia: pedido.colonia,
+      municipio: pedido.municipio,
+      estado_direccion: pedido.estado_direccion,
+      codigo_postal: pedido.codigo_postal,
+      lat: pedido.ubicacion_gps?.latitude || null,
+      lng: pedido.ubicacion_gps?.longitude || null,
+      maps_url: pedido.ubicacion_gps?.maps_url || null,
+    }).catch(e => logger.error("Error guardando direccion del cliente: " + e.message));
+  }
+
   const total = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
   const itemsTexto = items.map(i => `${i.cantidad || 1}x ${i.nombre} ($${i.precio})`).join("\n");
 
@@ -522,6 +539,23 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
     // causaba que reintentos sin esas palabras (ej. sin repetir el CP) se perdieran
     // en silencio, sin validar ni responder nada mas.
     if (estado?.fase === "esperando_direccion") {
+      // Si le ofrecimos su direccion guardada de un pedido anterior y el
+      // cliente solo confirma ("si", "va", "dale"...), usarla directo sin
+      // llamar a Google Maps otra vez -- ya tenemos todos los datos guardados.
+      if (estado.direccion_guardada && esConfirmacion(mensaje)) {
+        logger.info(`Cliente confirmo su direccion guardada de siempre`);
+        await resolverDireccionYPreguntarSucursal(telefono, estado, {
+          direccion: estado.direccion_guardada.direccion,
+          colonia: estado.direccion_guardada.colonia,
+          municipio: estado.direccion_guardada.municipio,
+          estado: estado.direccion_guardada.estado_direccion,
+          codigoPostal: estado.direccion_guardada.codigo_postal,
+          coords: estado.direccion_guardada.coords,
+          maps_url: estado.direccion_guardada.maps_url,
+        });
+        return;
+      }
+
       logger.info(`Direccion recibida, validando con Google Maps...`);
 
       // Validar direccion con Google Maps
@@ -658,6 +692,8 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
     // de arriba puede haber creado un estado minimo (solo con nombre_cliente,
     // sin fase todavia) -- eso no debe impedir que este bloque arranque el
     // flujo de domicilio normalmente.
+    let mensajeOverride = null;
+
     if (pidioDir && tieneProductos && !estado?.fase) {
       const items = resultado.datos?.pedido?.items ||
         extraerItemsConPreciosReales(resultado.historialActualizado);
@@ -667,6 +703,22 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       const sucursalEnTexto = sucursalesActivasCaso5.find(s =>
         resultado.texto.toLowerCase().includes(s.nombre.toLowerCase())
       );
+
+      // Si el telefono ya tiene una direccion guardada de un pedido anterior,
+      // ofrecerla directamente en vez de pedirle al cliente que la escriba de
+      // cero otra vez (solo cuando el agente todavia no menciono sucursal --
+      // caso normal, recien se esta pidiendo la direccion).
+      const clienteGuardado = !sucursalEnTexto ? await db.obtenerClientePorTelefono(telefono) : null;
+      const direccionGuardada = clienteGuardado?.direccion ? {
+        direccion: clienteGuardado.direccion,
+        colonia: clienteGuardado.colonia,
+        municipio: clienteGuardado.municipio,
+        estado_direccion: clienteGuardado.estado_direccion,
+        codigo_postal: clienteGuardado.codigo_postal,
+        coords: (clienteGuardado.lat && clienteGuardado.lng) ? { lat: Number(clienteGuardado.lat), lng: Number(clienteGuardado.lng) } : null,
+        maps_url: clienteGuardado.maps_url,
+      } : null;
+
       await db.guardarEstadoPedido(telefono, {
         fase: sucursalEnTexto ? "esperando_confirmacion_sucursal" : "esperando_direccion",
         items: items.map(i => {
@@ -676,8 +728,13 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         sucursal_sugerida: sucursalEnTexto?.nombre || null,
         nombre_cliente: estado?.nombre_cliente || null,
         direccion: null,
+        direccion_guardada: direccionGuardada,
       });
-      logger.info(`Estado guardado: fase=${sucursalEnTexto ? "esperando_confirmacion_sucursal" : "esperando_direccion"}, sucursal=${sucursalEnTexto?.nombre || "null"}`);
+      logger.info(`Estado guardado: fase=${sucursalEnTexto ? "esperando_confirmacion_sucursal" : "esperando_direccion"}, sucursal=${sucursalEnTexto?.nombre || "null"}${direccionGuardada ? ", con direccion guardada sugerida" : ""}`);
+
+      if (direccionGuardada) {
+        mensajeOverride = `📍 ¿Enviamos a tu dirección de siempre (${direccionGuardada.direccion})? Responde "sí" para confirmarla, o mándame la nueva dirección / comparte tu ubicación en tiempo real si cambió.`;
+      }
     }
 
     // Si el agente registro pedido directamente
@@ -694,7 +751,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       if (resultado.accion === "REGISTRAR_RESERVACION" || resultado.accion === "ESCALAR_HUMANO") {
         await ejecutarAccion(resultado.accion, resultado.datos, telefono);
       }
-      await enviarMensaje(telefono, resultado.texto);
+      await enviarMensaje(telefono, mensajeOverride || resultado.texto);
     }
 
   } catch (error) {
@@ -769,6 +826,20 @@ async function ejecutarAccion(accion, datos, telefono) {
         };
         await db.guardarPedido(pedido);
         logger.info(`Pedido pre-registrado (pendiente de pago, via IA): ${pedido.id} -> ${pedido.sucursal}`);
+
+        // Igual que en crearPedidoDomicilioYPedirPago: recordar esta direccion
+        // para ofrecerla en el proximo pedido del mismo telefono.
+        db.guardarClienteDireccion(telefono, {
+          nombre: pedido.nombre_cliente,
+          direccion: pedido.direccion,
+          colonia: pedido.colonia,
+          municipio: pedido.municipio,
+          estado_direccion: pedido.estado_direccion,
+          codigo_postal: pedido.codigo_postal,
+          lat: pedido.ubicacion_gps?.latitude || null,
+          lng: pedido.ubicacion_gps?.longitude || null,
+          maps_url: pedido.ubicacion_gps?.maps_url || null,
+        }).catch(e => logger.error("Error guardando direccion del cliente: " + e.message));
 
         const totalDomicilio = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
         const itemsTextoDomicilio = items.map(i => `${i.cantidad || 1}x ${i.nombre} ($${i.precio})`).join("\n");
