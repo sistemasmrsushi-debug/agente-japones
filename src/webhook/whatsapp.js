@@ -298,15 +298,30 @@ async function crearPedidoDomicilioYPedirPago(telefono, opts) {
 }
 
 // ── Extrae items del historial con precios REALES del menu ────────────────────
+// CORREGIDO: antes se usaba un solo regex sobre TODO el texto del mensaje
+// junto, buscando "NombreDelPlatillo $precio". Ese regex solo permitia
+// letras/espacios/puntos entre el nombre y el "$" -- cualquier otro caracter
+// (":", numeros, parentesis) lo cortaba. El problema real: cuando el agente
+// resume el pedido en una lista tipo "Sushi Mr. Manchego: $195" (formato muy
+// comun, "Nombre: $precio"), los dos puntos rompian el match justo antes del
+// nombre, dejando un nombre vacio -- ese producto se perdia por completo del
+// pedido (bug reportado: pedido de 2 productos, solo se registraba 1).
+// Ahora se procesa linea por linea: se toma todo lo que hay ANTES del "$" en
+// esa linea, se limpian los simbolos de lista al inicio (bullets, numeros,
+// puntos de numeracion) y los dos puntos/espacios al final -- mucho mas
+// tolerante a como el agente decida formatear el resumen del pedido.
 function extraerItemsConPreciosReales(historial) {
   const items = [];
   for (let i = historial.length - 1; i >= 0; i--) {
     if (historial[i].role === "assistant") {
       const texto = historial[i].content;
-      // Buscar nombres de platillos mencionados y verificar en el menu
-      const matches = [...texto.matchAll(/([A-Za-záéíóúÁÉÍÓÚñÑ\s\.]+?)\s*\$\s*(\d+)/g)];
-      for (const m of matches) {
-        const nombre = m[1].trim();
+      for (const linea of texto.split("\n")) {
+        const m = linea.match(/\$\s*(\d+)/);
+        if (!m) continue;
+        const nombre = linea.slice(0, m.index)
+          .replace(/^[\s•\-\*\d\.\)]+/, "") // bullets/numeros de lista al inicio
+          .replace(/[:\s]+$/, "") // dos puntos y espacios sueltos al final
+          .trim();
         if (nombre.length > 3) {
           const platillo = buscarPlatillo(nombre);
           if (platillo && !items.find(x => x.nombre === platillo.nombre)) {
