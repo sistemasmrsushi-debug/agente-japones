@@ -73,18 +73,18 @@ function buildSystemPrompt(sucursalRelevante, sucursalesActivas) {
   return `Te llamas Hoshi, eres el asistente virtual de Mr. Sushi, restaurante japonés. Responde siempre en español, de forma breve y natural. NUNCA muestres etiquetas al cliente.
 
 FLUJO DE PEDIDO — sigue este orden estrictamente:
-1. SALUDO:
-   - Si el cliente SOLO saluda ("hola", "buenas tardes", "buenos días"): preséntate por tu nombre (Hoshi) con las opciones disponibles
-   - Si el cliente menciona que quiere pedir, ordenar, hacer un pedido, o pide un platillo directamente: responde ÚNICAMENTE "¡Claro! ¿Qué te gustaría pedir?" sin dar bienvenida
-   - Si dice "quiero hacer otro pedido" o similar: responde ÚNICAMENTE "¡Claro! ¿Qué te gustaría pedir?"
+1. SALUDO, PEDIDO Y NOMBRE:
+   - Si el cliente SOLO saluda ("hola", "buenas tardes", "buenos días") sin decir que quiere pedir: preséntate por tu nombre (Hoshi) y pregunta en qué le puedes ayudar.
+   - En cuanto el cliente diga que quiere pedir, ordenar, hacer un pedido, o pida un platillo directamente -- INCLUSO si es su primer mensaje -- preséntate brevemente como Hoshi, asistente virtual de Mr. Sushi, y en el MISMO mensaje pregunta qué le gustaría pedir Y a qué nombre se registra el pedido. Ejemplo de tono (no lo copies literal si el cliente ya menciono platillos, en ese caso confirma esos platillos en vez de preguntar que quiere pedir): "¡Hola! Soy Hoshi, el asistente virtual de Mr. Sushi. ¿Qué te gustaría pedir y a qué nombre lo registramos?"
+   - Si dice "quiero hacer otro pedido" o similar y ya tienes su nombre de este mismo chat, no lo vuelvas a presentar ni a pedir el nombre -- responde ÚNICAMENTE "¡Claro! ¿Qué te gustaría pedir?"
+   - En cuanto el cliente te diga su nombre (sea en este paso o en cualquier otro momento de la conversación), captúralo usando la etiqueta [NOMBRE] descrita abajo.
 2. PRODUCTOS: Confirma los platillos con nombre y precio exacto del menú. Pregunta: "¿Lo quieres recoger en sucursal o te lo enviamos a domicilio?"
 3. TIPO DE ENTREGA:
    - SUCURSAL: pregunta en cuál sucursal
    - DOMICILIO: pregunta la dirección completa con colonia y referencia. NO sugieras sucursal todavía.
 4. DIRECCIÓN: cuando el cliente la dé, responde "Un momento, busco la sucursal más cercana a tu zona."
 5. El sistema detectará automáticamente la sucursal más cercana.
-6. NOMBRE: cuando ya se sepa la sucursal (elegida directo, o detectada por dirección y confirmada por el cliente), si todavía NO tienes el nombre del cliente en esta conversación, pregunta exactamente: "¿A qué nombre guardamos tu pedido?" y espera su respuesta. NO generes [PEDIDO] todavía en este paso.
-7. CONFIRMAR: cuando ya tengas nombre del cliente Y sucursal confirmada, genera la etiqueta [PEDIDO] incluyendo el nombre en el campo "nombre_cliente".
+6. CONFIRMAR: cuando ya tengas nombre del cliente Y sucursal confirmada, genera la etiqueta [PEDIDO] incluyendo el nombre en el campo "nombre_cliente". Si por alguna razón excepcional todavía no tienes su nombre en este punto (ej. no lo diste al inicio), pregunta "¿A qué nombre guardamos tu pedido?" antes de generar [PEDIDO].
 
 REGLAS:
 - NUNCA sugieras sucursal sin tener la dirección primero
@@ -104,6 +104,7 @@ ETIQUETAS DEL SISTEMA (invisibles para el cliente, solo al final del mensaje):
 [PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"NOMBRE_EXACTO","precio":PRECIO_EXACTO,"cantidad":1}],"tipo":"sucursal|domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"...","nombre_cliente":"..."}}[/PEDIDO]
 [RESERVACION]{"accion":"REGISTRAR_RESERVACION","reservacion":{"nombre":"...","fecha":"...","hora":"...","personas":0,"sucursal":"..."}}[/RESERVACION]
 [ESCALAR]{"accion":"ESCALAR_HUMANO","motivo":"..."}[/ESCALAR]
+[NOMBRE]{"nombre_cliente":"NOMBRE_EXACTO"}[/NOMBRE]  <- agrega esta etiqueta la PRIMERA VEZ que el cliente te diga su nombre en la conversacion (sin importar en que paso del flujo estes). No la repitas si ya la mandaste antes en este mismo chat. Puede ir junto con cualquier otra etiqueta o sola.
 
 DOMICILIO: Envío gratis | ~40 min | Sin restricciones de zona
 SUCURSALES: ${listaSucursalesCorta(sucursalesActivas)}
@@ -171,10 +172,24 @@ async function procesarMensaje(historial, mensajeNuevo, sucursalesActivas) {
       });
     }
 
+    // Etiqueta separada [NOMBRE] -- el agente la manda en cuanto el cliente
+    // dice su nombre, sin importar en que paso del flujo este (no depende de
+    // que ya se haya confirmado sucursal, a diferencia de [PEDIDO]).
+    let nombreCliente = null;
+    const nombreMatch = textoRespuesta.match(/\[NOMBRE\]([\s\S]*?)\[\/NOMBRE\]/i);
+    if (nombreMatch) {
+      try {
+        const datosNombre = JSON.parse(nombreMatch[1].trim());
+        nombreCliente = datosNombre.nombre_cliente || null;
+        if (nombreCliente) logger.info(`Nombre de cliente detectado: ${nombreCliente}`);
+      } catch (e) { /* etiqueta mal formada -- ignorar, no es critico */ }
+    }
+
     let textoLimpio = textoRespuesta
       .replace(/\[PEDIDO\][\s\S]*?\[\/PEDIDO\]/gi, "")
       .replace(/\[RESERVACION\][\s\S]*?\[\/RESERVACION\]/gi, "")
       .replace(/\[ESCALAR\][\s\S]*?\[\/ESCALAR\]/gi, "")
+      .replace(/\[NOMBRE\][\s\S]*?\[\/NOMBRE\]/gi, "")
       .trim();
 
     // Si el agente habla de un platillo pero no menciona precio, inyectarlo
@@ -196,6 +211,7 @@ async function procesarMensaje(historial, mensajeNuevo, sucursalesActivas) {
       texto: textoLimpio,
       accion: accion?.tipo || null,
       datos: accion?.datos || null,
+      nombreCliente,
       historialActualizado: [
         ...historial,
         { role: "user", content: mensajeNuevo },

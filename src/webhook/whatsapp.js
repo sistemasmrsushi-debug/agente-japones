@@ -571,6 +571,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         await db.guardarEstadoPedido(telefono, {
           fase: "esperando_confirmacion_sucursal",
           sucursal_sugerida: sucursalFinal,
+          nombre_cliente: resultado.nombreCliente || estado?.nombre_cliente || null,
           items,
           direccion: dirFinal,
           colonia: geoResult.colonia || null,
@@ -603,13 +604,30 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
     const resultado = await procesarMensaje(historial, mensaje, sucursalesActivasCaso5);
     await db.guardarHistorial(telefono, resultado.historialActualizado);
 
+    // CORREGIDO: antes, cuando el cliente daba su nombre a mitad de
+    // conversacion, no se guardaba en ningun lado -- el pedido final se
+    // creaba con nombre_cliente=null sin importar lo que el cliente hubiera
+    // dicho, porque nada en este archivo capturaba esa respuesta. Ahora se
+    // guarda en cuanto el agente lo detecta (etiqueta [NOMBRE] de agente.js),
+    // sin importar en que paso del flujo este, y se conserva junto con el
+    // resto del estado para que llegue hasta el pedido final.
+    if (resultado.nombreCliente && resultado.nombreCliente !== estado?.nombre_cliente) {
+      estado = { ...(estado || {}), nombre_cliente: resultado.nombreCliente };
+      await db.guardarEstadoPedido(telefono, estado);
+      logger.info(`Nombre del cliente guardado para ${telefono}: ${resultado.nombreCliente}`);
+    }
+
     // Detectar si el agente esta pidiendo la direccion al cliente
     const textoBajo = resultado.texto.toLowerCase();
     const pidioDir = /direcci[oó]n|colonia|referencia/.test(textoBajo);
     const tieneProductos = resultado.datos?.pedido?.items?.length > 0 ||
       extraerItemsConPreciosReales(resultado.historialActualizado).length > 0;
 
-    if (pidioDir && tieneProductos && !estado) {
+    // NOTA: se compara contra estado?.fase (no solo estado) porque el bloque
+    // de arriba puede haber creado un estado minimo (solo con nombre_cliente,
+    // sin fase todavia) -- eso no debe impedir que este bloque arranque el
+    // flujo de domicilio normalmente.
+    if (pidioDir && tieneProductos && !estado?.fase) {
       const items = resultado.datos?.pedido?.items ||
         extraerItemsConPreciosReales(resultado.historialActualizado);
       // Detectar si el agente ya menciono una sucursal en su respuesta (solo
@@ -625,6 +643,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
           return real ? { nombre: real.nombre, precio: real.precio, cantidad: i.cantidad || 1 } : i;
         }),
         sucursal_sugerida: sucursalEnTexto?.nombre || null,
+        nombre_cliente: estado?.nombre_cliente || null,
         direccion: null,
       });
       logger.info(`Estado guardado: fase=${sucursalEnTexto ? "esperando_confirmacion_sucursal" : "esperando_direccion"}, sucursal=${sucursalEnTexto?.nombre || "null"}`);
