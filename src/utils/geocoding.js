@@ -112,6 +112,73 @@ async function validarDireccion(direccionTexto) {
   }
 }
 
+// Geocodificacion INVERSA: dado un par de coordenadas (lat/lng, tal como las
+// manda WhatsApp cuando el cliente comparte su ubicacion en tiempo real o un
+// pin fijo), obtiene la direccion formateada + colonia/municipio/estado/CP,
+// usando el mismo endpoint de Google (Geocoding API) con "latlng=" en vez de
+// "address=". Se usa como fallback cuando el cliente escribio mal su
+// direccion y Google no pudo encontrarla como texto.
+async function geocodificarInverso(lat, lng) {
+  const mapsUrl = `https://maps.google.com/?q=${lat},${lng}`;
+  try {
+    const apiKey = process.env.GOOGLE_MAPS_KEY;
+    if (!apiKey) {
+      // Sin API key no se puede obtener direccion/colonia/CP -- se acepta la
+      // ubicacion tal cual, con las coordenadas como unico dato (igual que
+      // validarDireccion cuando falla la llamada a Google).
+      return { valida: true, direccion: `Ubicación compartida (${lat}, ${lng})`, coords: { lat, lng }, maps_url: mapsUrl };
+    }
+
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}&language=es&region=MX`;
+
+    const https = require("https");
+    const data = await new Promise((resolve, reject) => {
+      https.get(url, (res) => {
+        let body = "";
+        res.on("data", chunk => body += chunk);
+        res.on("end", () => {
+          try { resolve(JSON.parse(body)); }
+          catch(e) { reject(e); }
+        });
+      }).on("error", reject);
+    });
+
+    if (data.status !== "OK" || !data.results?.length) {
+      logger.warn(`Geocodificacion inversa sin resultados: (${lat}, ${lng}) -> ${data.status}`);
+      return { valida: true, direccion: `Ubicación compartida (${lat}, ${lng})`, coords: { lat, lng }, maps_url: mapsUrl };
+    }
+
+    const resultado = data.results[0];
+    const direccionNormalizada = resultado.formatted_address
+      .replace(", Mexico", "")
+      .replace(", México", "")
+      .trim();
+
+    const componentes = resultado.address_components;
+    const colonia = componentes.find(c => c.types.includes("sublocality_level_1"))?.long_name || null;
+    const municipio = componentes.find(c => c.types.includes("locality"))?.long_name || null;
+    const estado = componentes.find(c => c.types.includes("administrative_area_level_1"))?.long_name || null;
+    const codigoPostal = componentes.find(c => c.types.includes("postal_code"))?.long_name || null;
+
+    logger.info(`Geocodificacion inversa: (${lat}, ${lng}) -> "${direccionNormalizada}"`);
+
+    return {
+      valida: true,
+      direccion: direccionNormalizada,
+      colonia,
+      municipio,
+      estado,
+      codigoPostal,
+      coords: { lat, lng },
+      maps_url: mapsUrl,
+    };
+
+  } catch (error) {
+    logger.error("Error geocodificacion inversa: " + error.message);
+    return { valida: true, direccion: `Ubicación compartida (${lat}, ${lng})`, coords: { lat, lng }, maps_url: mapsUrl };
+  }
+}
+
 // Distancia en linea recta (km) entre dos coordenadas, usando la formula de
 // Haversine. Es una aproximacion (no la distancia real por calle), suficiente
 // para decidir si una direccion cae razonablemente cerca de una sucursal.
@@ -127,4 +194,4 @@ function calcularDistanciaKm(lat1, lng1, lat2, lng2) {
   return R * c;
 }
 
-module.exports = { validarDireccion, calcularDistanciaKm };
+module.exports = { validarDireccion, calcularDistanciaKm, geocodificarInverso };

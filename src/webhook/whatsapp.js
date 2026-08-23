@@ -5,7 +5,7 @@ const twilioLib = require("twilio");
 const { procesarMensaje, detectarSucursalPorZona, buscarPlatillo } = require("../agent/agente");
 const logger = require("../utils/logger");
 const db = require("../db/database");
-const { validarDireccion, calcularDistanciaKm } = require("../utils/geocoding");
+const { validarDireccion, calcularDistanciaKm, geocodificarInverso } = require("../utils/geocoding");
 const { generarLinkPago } = require("../utils/netpay");
 
 function getTwilioClient() {
@@ -147,6 +147,49 @@ async function resolverSucursalPorDistancia(zonaSugerida, coordsCliente) {
   return { sucursal: null, dentroDeRadio: false, cambio: false };
 }
 
+// ── Resuelve una direccion ya geocodificada (venga de texto validado con
+// Google o de una ubicacion GPS compartida por WhatsApp + geocodificacion
+// inversa) contra la sucursal mas cercana, y le pregunta al cliente cual
+// prefiere. Compartida por CASO 2 (direccion escrita) y por el manejo de
+// ubicacion en tiempo real (fallback cuando Google no reconoce lo escrito).
+async function resolverDireccionYPreguntarSucursal(telefono, estadoBase, geoResult, zonaHint = null) {
+  const dirFinal = geoResult.direccion;
+  const zona = detectarSucursalPorZona(dirFinal) || zonaHint;
+  const resolucion = await resolverSucursalPorDistancia(zona, geoResult.coords);
+
+  if (!resolucion.dentroDeRadio) {
+    await db.eliminarEstadoPedido(telefono); // limpiar estado para que el siguiente mensaje fluya normal con la IA
+    await enviarMensaje(telefono,
+      `Tu ubicación (${dirFinal}) queda fuera de nuestra zona de entrega a domicilio (radio de ${RADIO_ENTREGA_KM} km de cualquiera de nuestras sucursales). ¿Prefieres recoger tu pedido en alguna sucursal? Tenemos: ${listaNombres(await obtenerSucursalesActivas())}`
+    );
+    return;
+  }
+
+  await db.guardarEstadoPedido(telefono, {
+    ...estadoBase,
+    fase: "esperando_confirmacion_sucursal",
+    sucursal_sugerida: resolucion.sucursal || null,
+    direccion: dirFinal,
+    colonia: geoResult.colonia || null,
+    municipio: geoResult.municipio || null,
+    estado_direccion: geoResult.estado || null,
+    codigo_postal: geoResult.codigoPostal || null,
+    coords: geoResult.coords || null,
+    maps_url: geoResult.maps_url || null,
+  });
+
+  if (resolucion.sucursal) {
+    logger.info(`Direccion resuelta: "${dirFinal}" -> Sucursal sugerida: ${resolucion.sucursal}${resolucion.cambio ? ` (zona detectada "${zona}" quedaba fuera de rango)` : ""}`);
+    await enviarMensaje(telefono,
+      `📍 Dirección confirmada: ${dirFinal}\n\nTu sucursal más cercana es *${resolucion.sucursal}* 🍣. ¿Te enviamos desde ahí o prefieres otra?`
+    );
+  } else {
+    await enviarMensaje(telefono,
+      `📍 Dirección confirmada: ${dirFinal}\n\n¿Cuál sucursal prefieres? Tenemos: ${listaNombres(await obtenerSucursalesActivas())}`
+    );
+  }
+}
+
 // ── Crea el pedido a domicilio y manda el link de pago ─────────────────────────
 // CORREGIDO: antes, tanto CASO 2 como CASO 3 preguntaban "te enviamos desde ahi
 // o prefieres otra?" incluso cuando el sistema ya habia determinado con certeza
@@ -278,11 +321,27 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
 
     // ── GPS ───────────────────────────────────────────────────────────────
     if (req.body.Latitude && req.body.Longitude) {
-      const { Latitude: lat, Longitude: lng } = req.body;
-      await db.actualizarGPSPedido(telefono, {
-        latitude: lat, longitude: lng,
-        maps_url: `https://maps.google.com/?q=${lat},${lng}`
-      });
+      const lat = parseFloat(req.body.Latitude);
+      const lng = parseFloat(req.body.Longitude);
+      const maps_url = `https://maps.google.com/?q=${lat},${lng}`;
+
+      // Si el bot esta esperando que el cliente escriba su direccion (ej.
+      // porque Google no pudo reconocer lo que escribio antes, o porque el
+      // cliente prefiere compartir su ubicacion directamente), tratar la
+      // ubicacion recibida como la direccion: geocodificacion inversa +
+      // mismo flujo de resolver sucursal que usa el texto.
+      const estadoActual = await db.obtenerEstadoPedido(telefono);
+      if (estadoActual?.fase === "esperando_direccion") {
+        logger.info(`Ubicacion GPS recibida en fase esperando_direccion (${lat}, ${lng}) -- usando geocodificacion inversa`);
+        const geoResult = await geocodificarInverso(lat, lng);
+        await resolverDireccionYPreguntarSucursal(telefono, estadoActual, geoResult);
+        return;
+      }
+
+      // Comportamiento por defecto: el cliente comparte su ubicacion sin que
+      // se le haya pedido (ej. para afinar la entrega de un pedido que ya
+      // hizo) -- se actualiza el pedido a domicilio mas reciente.
+      await db.actualizarGPSPedido(telefono, { latitude: lat, longitude: lng, maps_url });
       await enviarMensaje(telefono, "📍 ¡Ubicación recibida! Ya la guardamos para la entrega.");
       return;
     }
@@ -470,55 +529,12 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
 
       if (!geoResult.valida) {
         await enviarMensaje(telefono,
-          `No encontramos esa direccion. Por favor verifica e intenta de nuevo con calle, numero, colonia y municipio.`
+          `No encontramos esa dirección. Puedes intentar de nuevo con calle, número, colonia y municipio, o compartir tu ubicación en tiempo real 📍 (icono del clip 📎 de WhatsApp → "Ubicación").`
         );
         return;
       }
 
-      // Usar direccion normalizada por Google
-      const dirFinal = geoResult.direccion;
-      const zona = detectarSucursalPorZona(dirFinal) || detectarSucursalPorZona(mensaje);
-
-      // Filtro de radio de entrega: confirma que la sucursal (por zona) quede
-      // razonablemente cerca del cliente; si no, busca la sucursal real mas
-      // cercana; si ninguna cae dentro del radio, se ofrece recoger en sucursal
-      // en vez de domicilio.
-      const resolucion = await resolverSucursalPorDistancia(zona, geoResult.coords);
-
-      if (!resolucion.dentroDeRadio) {
-        await db.eliminarEstadoPedido(telefono); // limpiar estado para que el siguiente mensaje fluya normal con la IA
-        await enviarMensaje(telefono,
-          `Tu direccion (${dirFinal}) queda fuera de nuestra zona de entrega a domicilio (radio de ${RADIO_ENTREGA_KM} km de cualquiera de nuestras sucursales). ¿Prefieres recoger tu pedido en alguna sucursal? Tenemos: ${listaNombres(await obtenerSucursalesActivas())}`
-        );
-        return;
-      }
-
-      // Se pregunta siempre cual sucursal usar (aunque el sistema ya sepa cual
-      // es la mas cercana) -- el mensaje ya no explica "queda un poco lejos" ni
-      // distingue casos, nada mas informa la sucursal mas cercana y pregunta.
-      await db.guardarEstadoPedido(telefono, {
-        ...estado,
-        fase: "esperando_confirmacion_sucursal",
-        sucursal_sugerida: resolucion.sucursal || null,
-        direccion: dirFinal,
-        colonia: geoResult.colonia || null,
-        municipio: geoResult.municipio || null,
-        estado_direccion: geoResult.estado || null,
-        codigo_postal: geoResult.codigoPostal || null,
-        coords: geoResult.coords || null,
-        maps_url: geoResult.maps_url || null,
-      });
-
-      if (resolucion.sucursal) {
-        logger.info(`Direccion validada: "${dirFinal}" -> Sucursal sugerida: ${resolucion.sucursal}${resolucion.cambio ? ` (zona detectada "${zona}" quedaba fuera de rango)` : ""}`);
-        await enviarMensaje(telefono,
-          `📍 Dirección confirmada: ${dirFinal}\n\nTu sucursal más cercana es *${resolucion.sucursal}* 🍣. ¿Te enviamos desde ahí o prefieres otra?`
-        );
-      } else {
-        await enviarMensaje(telefono,
-          `Direccion confirmada: ${dirFinal}\n\nCual sucursal prefieres? Tenemos: ${listaNombres(await obtenerSucursalesActivas())}`
-        );
-      }
+      await resolverDireccionYPreguntarSucursal(telefono, estado, geoResult, detectarSucursalPorZona(mensaje));
       return;
     }
 
@@ -532,8 +548,23 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       const geoResult = await validarDireccion(mensaje);
 
       if (!geoResult.valida) {
+        // Guardar lo ya detectado (items, nombre) en fase "esperando_direccion"
+        // para que, si el cliente comparte su ubicacion GPS a continuacion en
+        // vez de reescribir la direccion, el bot pueda completar el pedido con
+        // geocodificacion inversa en vez de perder todo el contexto.
+        const itemsParaFallback = resultado.datos?.pedido?.items
+          ? resultado.datos.pedido.items.map(i => {
+              const real = buscarPlatillo(i.nombre);
+              return real ? { nombre: real.nombre, precio: real.precio, cantidad: i.cantidad || 1 } : i;
+            })
+          : extraerItemsConPreciosReales(resultado.historialActualizado);
+        await db.guardarEstadoPedido(telefono, {
+          fase: "esperando_direccion",
+          items: itemsParaFallback,
+          nombre_cliente: resultado.nombreCliente || estado?.nombre_cliente || null,
+        });
         await enviarMensaje(telefono,
-          `No pudimos confirmar esa direccion. Por favor verifica e intenta de nuevo con calle, numero, colonia y municipio.`
+          `No pudimos confirmar esa dirección. Puedes intentar de nuevo con calle, número, colonia y municipio, o compartir tu ubicación en tiempo real 📍 (icono del clip 📎 de WhatsApp → "Ubicación").`
         );
         return;
       }
@@ -691,8 +722,16 @@ async function ejecutarAccion(accion, datos, telefono) {
         const geoResult = await validarDireccion(direccionCliente);
 
         if (!geoResult.valida) {
+          // Igual que en CASO 3: dejar el pedido "aparcado" en fase
+          // esperando_direccion para que una ubicacion GPS compartida a
+          // continuacion pueda completarlo via geocodificacion inversa.
+          await db.guardarEstadoPedido(telefono, {
+            fase: "esperando_direccion",
+            items,
+            nombre_cliente: datos.pedido?.nombre_cliente || null,
+          });
           await enviarMensaje(telefono,
-            `No pudimos confirmar tu direccion (${direccionCliente}). Por favor verifica e intenta de nuevo con calle, numero, colonia y municipio.`
+            `No pudimos confirmar tu dirección (${direccionCliente}). Puedes intentar de nuevo con calle, número, colonia y municipio, o compartir tu ubicación en tiempo real 📍 (icono del clip 📎 de WhatsApp → "Ubicación").`
           );
           return;
         }
