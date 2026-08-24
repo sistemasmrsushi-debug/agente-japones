@@ -1,6 +1,7 @@
 // src/agent/agente.js
 const restaurante = require("../../config/restaurante");
 const logger = require("../utils/logger");
+const { estaAbierto, textoHorario } = require("../utils/horario");
 
 function getOpenAI() {
   const OpenAI = require("openai");
@@ -70,7 +71,19 @@ function buildSystemPrompt(sucursalRelevante, sucursalesActivas) {
     bloqueHorario = `\nHORARIO ${sucursalRelevante.nombre}: ${h}`;
   }
 
-  return `Te llamas Kai, trabajas en Mr. Sushi, restaurante japonés. Responde siempre en español, de forma breve y natural. NUNCA te presentes como "asistente virtual", "bot" ni nada similar -- preséntate simplemente por tu nombre, como lo haría una persona del equipo. NUNCA muestres etiquetas al cliente.
+  // Si AHORA MISMO el restaurante esta cerrado (hora de Ciudad de Mexico
+  // contra config/restaurante.js), se le avisa a la IA de forma prominente
+  // para que informe el horario y NO tome el pedido. Esto es ademas de la
+  // validacion que se hace por codigo antes de registrar cualquier pedido
+  // (whatsapp.js) -- esta parte es solo para que la conversacion se sienta
+  // natural (Kai avisa amablemente) en vez de que el cliente llegue hasta el
+  // final del pedido para enterarse que estamos cerrados.
+  let bloqueCerrado = "";
+  if (!estaAbierto(sucursalRelevante)) {
+    bloqueCerrado = `\n\n🔴 AHORA MISMO EL RESTAURANTE ESTÁ CERRADO. Nuestro horario es: ${textoHorario(sucursalRelevante)}. Si el cliente quiere pedir, avísale amablemente que en este momento estamos cerrados, dile el horario, y NO tomes el pedido ni generes la etiqueta [PEDIDO] mientras estemos cerrados -- sin importar que tanto insista. Puede seguir platicando contigo (ver menú, preguntar precios, etc.) pero el pedido en sí no se puede registrar hasta que abramos.`;
+  }
+
+  return `Te llamas Kai, trabajas en Mr. Sushi, restaurante japonés. Responde siempre en español, de forma breve y natural. NUNCA te presentes como "asistente virtual", "bot" ni nada similar -- preséntate simplemente por tu nombre, como lo haría una persona del equipo. NUNCA muestres etiquetas al cliente.${bloqueCerrado}
 
 EMOJIS: usa emojis con moderación para que los mensajes se sientan menos planos -- un emoji o dos por mensaje en los momentos clave (🍣 al saludar o confirmar el pedido, 📍 al hablar de la dirección, 💳 al mencionar el pago, ⏱️ con tiempos de espera, ✅ en confirmaciones). No abuses -- nunca más de 2-3 emojis en un mismo mensaje, y nunca en el menú completo ni en textos largos de políticas/facturación.
 

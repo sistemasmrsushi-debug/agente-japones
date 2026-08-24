@@ -10,13 +10,13 @@ module.exports = {
   telefono_principal: "33 9427 2277",
 
   horario_general: {
-    lunes:     { abre: "12:00", cierra: "22:00" },
-    martes:    { abre: "12:00", cierra: "22:00" },
-    miercoles: { abre: "12:00", cierra: "22:00" },
-    jueves:    { abre: "12:00", cierra: "22:00" },
-    viernes:   { abre: "12:00", cierra: "22:00" },
-    sabado:    { abre: "12:00", cierra: "22:00" },
-    domingo:   { abre: "13:00", cierra: "21:00" },
+    lunes:     { abre: "11:00", cierra: "22:00" },
+    martes:    { abre: "11:00", cierra: "22:00" },
+    miercoles: { abre: "11:00", cierra: "22:00" },
+    jueves:    { abre: "11:00", cierra: "22:00" },
+    viernes:   { abre: "11:00", cierra: "22:00" },
+    sabado:    { abre: "11:00", cierra: "22:00" },
+    domingo:   { abre: "11:00", cierra: "21:00" },
   },
 
   // ============================================================

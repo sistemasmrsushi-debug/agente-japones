@@ -7,6 +7,7 @@ const logger = require("../utils/logger");
 const db = require("../db/database");
 const { validarDireccion, calcularDistanciaKm, geocodificarInverso } = require("../utils/geocoding");
 const { generarLinkPago } = require("../utils/netpay");
+const { estaAbierto, textoHorario } = require("../utils/horario");
 
 function getTwilioClient() {
   return require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -198,6 +199,16 @@ async function resolverDireccionYPreguntarSucursal(telefono, estadoBase, geoResu
 // sucursal, se crea el pedido y se manda el link de pago directo (esta funcion,
 // compartida por los 3 lugares que la necesitan: CASO 1, CASO 2 y CASO 3).
 async function crearPedidoDomicilioYPedirPago(telefono, opts) {
+  // Bloqueo por horario: aunque la IA ya deberia haber avisado que estamos
+  // cerrados (ver bloqueCerrado en agente.js), esta es la validacion real
+  // que evita que un pedido se registre y se cobre fuera de horario, sin
+  // importar por que camino llego la conversacion hasta aqui.
+  if (!estaAbierto()) {
+    await enviarMensaje(telefono, `🔴 En este momento estamos cerrados. Nuestro horario es: ${textoHorario()}. ¡Te esperamos entonces! 🍣`);
+    await db.eliminarEstadoPedido(telefono);
+    return;
+  }
+
   let items = opts.items && opts.items.length > 0
     ? opts.items
     : extraerItemsConPreciosReales(await db.obtenerHistorial(telefono));
@@ -779,6 +790,15 @@ router.get("/webhook", (req, res) => res.send("Webhook activo"));
 async function ejecutarAccion(accion, datos, telefono) {
   try {
     if (accion === "REGISTRAR_PEDIDO") {
+      // Mismo bloqueo por horario que en crearPedidoDomicilioYPedirPago --
+      // este es el otro camino por el que se puede registrar un pedido (la
+      // IA lo detecta y genera la etiqueta [PEDIDO] directamente).
+      if (!estaAbierto()) {
+        await enviarMensaje(telefono, `🔴 En este momento estamos cerrados. Nuestro horario es: ${textoHorario()}. ¡Te esperamos entonces! 🍣`);
+        await db.eliminarEstadoPedido(telefono);
+        return;
+      }
+
       const items = (datos.pedido?.items || []).map(i => {
         const real = buscarPlatillo(i.nombre);
         return real ? { nombre: real.nombre, precio: real.precio, cantidad: i.cantidad || 1 } : i;
