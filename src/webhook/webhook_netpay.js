@@ -176,7 +176,16 @@ async function despacharUberDirect(pedido) {
       quoteId: cotizacion.quoteId,
       externalStoreId,
       dropoffNotes: pedido.referencias || undefined,
-      activarPincode: true,
+      // CORREGIDO (26-ago-2026, confirmado con una prueba real): Uber
+      // rechaza la entrega si se activa Pincode/firma/ID a la vez que
+      // undeliverable_action="leave_at_door" (error real de la API:
+      // "undeliverable_action is not compatible with requested Signature or
+      // ID requirements"). Segun la guia oficial de Uber, leave_at_door solo
+      // es compatible con verificacion por foto -- Pincode/firma/ID exigen
+      // que el flujo garantice contacto directo, sin opcion de "dejar y
+      // listo". Se prefirio mantener leave_at_door (no desechar comida si el
+      // cliente no puede recibir) y desactivar el Pincode.
+      activarPincode: false,
       testSpecifications: modoPrueba ? { robo_courier_specification: { mode: "auto" } } : undefined,
       credenciales,
     });
