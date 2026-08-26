@@ -114,9 +114,32 @@ async function despacharUberDirect(pedido) {
     // Mientras ese archivo este vacio (o esta sucursal no este mapeada
     // todavia), esto regresa null y crearEntrega usa las credenciales
     // globales de siempre -- no cambia nada hasta que se configure.
-    const credenciales = credencialesPorSucursal(pedido.sucursal);
-    if (credenciales) {
-      logger.info(`Despachando ${pedido.id} con credenciales de "${credenciales.razonSocial}" (sucursal: ${pedido.sucursal})`);
+    //
+    // SEGURIDAD (26-ago-2026): mientras no este confirmado con Uber que el
+    // modo de prueba (Robo Courier / test_specifications) es seguro usarlo
+    // con credenciales de PRODUCCION, en modo de prueba SIEMPRE se ignoran
+    // las credenciales por razon social (aunque ya esten configuradas) y se
+    // usan credenciales de sandbox dedicadas y explicitas
+    // (UBER_DIRECT_CLIENT_ID_SANDBOX / UBER_DIRECT_CLIENT_SECRET_SANDBOX).
+    // Asi, un despacho simulado NUNCA puede terminar autenticandose con
+    // credenciales productivas, sin importar que se vaya llenando
+    // uber_credenciales.js o que cambien las variables globales. Si esas
+    // variables de sandbox no estan configuradas, se cae de vuelta al
+    // comportamiento de siempre (credenciales por razon social, o si no hay,
+    // las globales UBER_DIRECT_CLIENT_ID/SECRET).
+    let credenciales;
+    if (modoPrueba && process.env.UBER_DIRECT_CLIENT_ID_SANDBOX && process.env.UBER_DIRECT_CLIENT_SECRET_SANDBOX) {
+      credenciales = {
+        clientId: process.env.UBER_DIRECT_CLIENT_ID_SANDBOX,
+        clientSecret: process.env.UBER_DIRECT_CLIENT_SECRET_SANDBOX,
+        razonSocial: "SANDBOX (modo de prueba)",
+      };
+      logger.info(`Despachando ${pedido.id} en modo de prueba con credenciales de SANDBOX dedicadas (nunca produccion).`);
+    } else {
+      credenciales = credencialesPorSucursal(pedido.sucursal);
+      if (credenciales) {
+        logger.info(`Despachando ${pedido.id} con credenciales de "${credenciales.razonSocial}" (sucursal: ${pedido.sucursal})`);
+      }
     }
 
     const resultado = await crearEntrega({
@@ -243,7 +266,21 @@ router.post("/webhook/netpay", async (req, res) => {
         // responseMsg -- el payload real trae transactionId, merchantRefCode,
         // responseCode y procRetMsg. Con los nombres viejos todo salia
         // "undefined" y el cliente nunca recibia el aviso de pago rechazado.
-        const { transactionId, amount, merchantRefCode, procRetMsg, responseCode } = data.data;
+        //
+        // CORREGIDO OTRA VEZ (confirmado con logs reales, 26-ago-2026, caso de
+        // certificacion 3.3 review@ / AMEX): resulta que "transaction.failed"
+        // NO siempre trae los nombres de arriba -- en este caso vino con
+        // transactionTokenId/merchantReferenceCode/responseMsg, exactamente
+        // el formato "viejo" que se penso que ya no se usaba. Netpay manda
+        // AMBAS variantes de nombres de campo segun el caso (no se pudo
+        // determinar el patron exacto), asi que ahora se aceptan las dos --
+        // si no, merchantRefCode volvia a salir undefined y el cliente se
+        // quedaba otra vez sin el aviso de pago rechazado.
+        const d = data.data;
+        const transactionId = d.transactionId || d.transactionTokenId;
+        const merchantRefCode = d.merchantRefCode || d.merchantReferenceCode;
+        const procRetMsg = d.procRetMsg || d.responseMsg;
+        const { amount, responseCode } = d;
         logger.warn(`Pago RECHAZADO: transactionId=${transactionId}, monto=${amount}, motivo=${procRetMsg} (codigo ${responseCode}), pedido=${merchantRefCode}`);
 
         if (merchantRefCode) {
