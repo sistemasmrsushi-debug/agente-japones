@@ -8,6 +8,7 @@ const logger = require("../utils/logger");
 const db = require("../db/database");
 const { consultarEstatusTransaccion } = require("../utils/netpay");
 const { crearEntrega } = require("../utils/uber_direct");
+const { credencialesPorSucursal } = require("../../config/uber_credenciales");
 
 function getTwilioClient() {
   return require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -109,12 +110,22 @@ async function despacharUberDirect(pedido) {
       logger.warn(`UBER_DIRECT_MODO_PRUEBA activo -- el despacho de ${pedido.id} sera SIMULADO (Robo Courier), no se manda repartidor real.`);
     }
 
+    // Credenciales de Uber Direct por razon social (ver config/uber_credenciales.js).
+    // Mientras ese archivo este vacio (o esta sucursal no este mapeada
+    // todavia), esto regresa null y crearEntrega usa las credenciales
+    // globales de siempre -- no cambia nada hasta que se configure.
+    const credenciales = credencialesPorSucursal(pedido.sucursal);
+    if (credenciales) {
+      logger.info(`Despachando ${pedido.id} con credenciales de "${credenciales.razonSocial}" (sucursal: ${pedido.sucursal})`);
+    }
+
     const resultado = await crearEntrega({
       pickup,
       dropoff,
       items: pedido.items,
       referencia: pedido.id,
       testSpecifications: modoPrueba ? { robo_courier_specification: { mode: "auto" } } : undefined,
+      credenciales,
     });
 
     if (resultado.exito) {

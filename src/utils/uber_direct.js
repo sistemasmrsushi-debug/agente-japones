@@ -18,7 +18,16 @@ const AUTH_HOSTNAME = "auth.uber.com";
 const API_HOSTNAME = "api.uber.com";
 
 // ── Cache del access token (dura ~30 dias, no hace falta pedirlo en cada request) ──
-let tokenCache = { token: null, expiraEn: 0 };
+// PREPARADO PARA MULTIPLES RAZONES SOCIALES: cada razon social puede tener su
+// propio client_id/client_secret (el customer_id es el mismo para todas). El
+// cache ahora es por client_id en vez de un solo valor global, para que cada
+// razon social tenga su propio token sin pisar el de las demas. Mientras no
+// se pase "credenciales" a las funciones de abajo, todo sigue funcionando
+// exactamente igual que antes (usa las variables de entorno globales
+// UBER_DIRECT_CLIENT_ID / UBER_DIRECT_CLIENT_SECRET) -- nada cambia de
+// comportamiento hasta que se configure el mapeo en
+// config/uber_credenciales.js.
+const tokenCache = new Map(); // clientId -> { token, expiraEn }
 
 function requestJSON({ hostname, path, method, headers, body }) {
   return new Promise((resolve) => {
@@ -43,18 +52,23 @@ function requestJSON({ hostname, path, method, headers, body }) {
 }
 
 // ── AUTENTICACION ──────────────────────────────────────────────────────────────
-async function obtenerAccessToken() {
-  const ahora = Date.now();
-  if (tokenCache.token && ahora < tokenCache.expiraEn) {
-    return tokenCache.token;
-  }
-
-  const clientId = process.env.UBER_DIRECT_CLIENT_ID;
-  const clientSecret = process.env.UBER_DIRECT_CLIENT_SECRET;
+// "credenciales" es opcional: { clientId, clientSecret } de una razon social
+// especifica (ver config/uber_credenciales.js). Si no se pasa (o esa razon
+// social todavia no esta configurada), cae de vuelta a las variables de
+// entorno globales -- comportamiento identico al de antes de este cambio.
+async function obtenerAccessToken(credenciales = null) {
+  const clientId = credenciales?.clientId || process.env.UBER_DIRECT_CLIENT_ID;
+  const clientSecret = credenciales?.clientSecret || process.env.UBER_DIRECT_CLIENT_SECRET;
 
   if (!clientId || !clientSecret) {
     logger.error("UBER_DIRECT_CLIENT_ID / UBER_DIRECT_CLIENT_SECRET no configurados");
     return null;
+  }
+
+  const ahora = Date.now();
+  const cacheado = tokenCache.get(clientId);
+  if (cacheado && ahora < cacheado.expiraEn) {
+    return cacheado.token;
   }
 
   const body = new URLSearchParams({
@@ -76,13 +90,13 @@ async function obtenerAccessToken() {
   });
 
   if (respuesta.statusCode === 200 && respuesta.json?.access_token) {
-    tokenCache = {
+    tokenCache.set(clientId, {
       token: respuesta.json.access_token,
       // Restamos 5 min de margen para renovar antes de que expire de verdad
       expiraEn: ahora + (respuesta.json.expires_in * 1000) - (5 * 60 * 1000),
-    };
-    logger.info("Token de Uber Direct obtenido correctamente");
-    return tokenCache.token;
+    });
+    logger.info(`Token de Uber Direct obtenido correctamente${credenciales?.razonSocial ? ` (${credenciales.razonSocial})` : ""}`);
+    return respuesta.json.access_token;
   }
 
   logger.error(`Error obteniendo token de Uber Direct: status=${respuesta.statusCode}, body=${respuesta.raw}`);
@@ -101,8 +115,10 @@ function armarDireccionUber({ calle, ciudad, estado, codigoPostal }) {
 }
 
 // ── COTIZACION (opcional pero recomendado antes de crear la entrega) ───────────
-async function crearCotizacion({ pickup, dropoff }) {
-  const token = await obtenerAccessToken();
+// credenciales (opcional): { clientId, clientSecret } de la razon social
+// dueña de la sucursal que despacha -- ver config/uber_credenciales.js.
+async function crearCotizacion({ pickup, dropoff, credenciales }) {
+  const token = await obtenerAccessToken(credenciales);
   if (!token) return { exito: false, error: "No se pudo obtener token de Uber Direct" };
 
   const customerId = process.env.UBER_DIRECT_CUSTOMER_ID;
@@ -152,8 +168,10 @@ async function crearCotizacion({ pickup, dropoff }) {
 // se activa si se manda este parametro explicitamente en la peticion. Sin el,
 // una entrega se procesa igual sea cual sea el tipo de credenciales. Ejemplo
 // para pruebas: { robo_courier_specification: { mode: "auto" } }
-async function crearEntrega({ pickup, dropoff, items, referencia, quoteId, testSpecifications }) {
-  const token = await obtenerAccessToken();
+// credenciales (opcional): { clientId, clientSecret } de la razon social
+// dueña de la sucursal que despacha -- ver config/uber_credenciales.js.
+async function crearEntrega({ pickup, dropoff, items, referencia, quoteId, testSpecifications, credenciales }) {
+  const token = await obtenerAccessToken(credenciales);
   if (!token) return { exito: false, error: "No se pudo obtener token de Uber Direct" };
 
   const customerId = process.env.UBER_DIRECT_CUSTOMER_ID;
@@ -213,8 +231,8 @@ async function crearEntrega({ pickup, dropoff, items, referencia, quoteId, testS
 }
 
 // ── CONSULTAR ENTREGA (respaldo si un webhook se pierde) ────────────────────────
-async function consultarEntrega(deliveryId) {
-  const token = await obtenerAccessToken();
+async function consultarEntrega(deliveryId, credenciales) {
+  const token = await obtenerAccessToken(credenciales);
   if (!token) return { exito: false, error: "No se pudo obtener token de Uber Direct" };
 
   const customerId = process.env.UBER_DIRECT_CUSTOMER_ID;
@@ -232,8 +250,8 @@ async function consultarEntrega(deliveryId) {
 }
 
 // ── CANCELAR ENTREGA ─────────────────────────────────────────────────────────────
-async function cancelarEntrega(deliveryId) {
-  const token = await obtenerAccessToken();
+async function cancelarEntrega(deliveryId, credenciales) {
+  const token = await obtenerAccessToken(credenciales);
   if (!token) return { exito: false, error: "No se pudo obtener token de Uber Direct" };
 
   const customerId = process.env.UBER_DIRECT_CUSTOMER_ID;
