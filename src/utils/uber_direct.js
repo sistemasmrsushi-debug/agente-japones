@@ -104,12 +104,44 @@ async function obtenerAccessToken(credenciales = null) {
 }
 
 // ── Arma el objeto de direccion en el formato que pide Uber (JSON como string) ──
-function armarDireccionUber({ calle, ciudad, estado, codigoPostal }) {
+//
+// CORREGIDO (26-ago-2026, feedback real de certificacion Uber Direct
+// compartido por Diego de otro proyecto/Grupo Telnet): Uber exige que la
+// direccion venga ESTRUCTURADA -- street_address[0] = solo calle y numero,
+// street_address[1] = colonia (opcional), y city/state/zip_code como campos
+// separados. Antes se mandaba el texto COMPLETO de Google Maps (calle,
+// colonia, municipio, estado, CP, todo junto) en un solo street_address[0].
+//
+// "calle" se obtiene tomando el primer segmento (antes de la primera coma)
+// de la direccion completa que regresa Google Maps -- su formato SIEMPRE
+// pone "Calle Numero" como primer segmento (ej. "Av. Lomas Verdes 22, Lomas
+// Verdes, 53120 Naucalpan de Juarez, Mex., Mexico" -> "Av. Lomas Verdes 22").
+//
+// FALLBACK IMPORTANTE: si no tenemos ciudad/estado por separado todavia
+// (ej. una sucursal que aun no se ha vuelto a geocodificar con estos campos
+// nuevos -- ver scripts/backfill_direccion_sucursales.js), se cae de vuelta
+// a mandar el texto completo en street_address[0] tal como se hacia antes.
+// Ese es el comportamiento que ya esta confirmado funcionando en produccion
+// (fix de "failed to create location", 23-ago-2026) -- no se quiere arriesgar
+// romper despachos reales mientras se completa el backfill de sucursales.
+function extraerCalle(direccionCompleta) {
+  if (!direccionCompleta) return "";
+  return direccionCompleta.split(",")[0].trim();
+}
+
+function armarDireccionUber({ direccionCompleta, colonia, ciudad, estado, codigoPostal }) {
+  const calle = extraerCalle(direccionCompleta);
+  const tieneComponentes = Boolean(calle && ciudad && estado);
+
+  const streetAddress = tieneComponentes
+    ? [calle, colonia].filter(Boolean)
+    : [direccionCompleta || ""];
+
   return JSON.stringify({
-    street_address: [calle || ""],
-    city: ciudad || "",
-    state: estado || "",
-    zip_code: codigoPostal || "",
+    street_address: streetAddress,
+    city: tieneComponentes ? ciudad : "",
+    state: tieneComponentes ? estado : "",
+    zip_code: (tieneComponentes && codigoPostal) || "",
     country: "MX",
   });
 }
@@ -170,7 +202,27 @@ async function crearCotizacion({ pickup, dropoff, credenciales }) {
 // para pruebas: { robo_courier_specification: { mode: "auto" } }
 // credenciales (opcional): { clientId, clientSecret } de la razon social
 // dueña de la sucursal que despacha -- ver config/uber_credenciales.js.
-async function crearEntrega({ pickup, dropoff, items, referencia, quoteId, testSpecifications, credenciales }) {
+//
+// CORREGIDO (26-ago-2026, feedback real de certificacion Uber Direct
+// compartido por Diego de otro proyecto/Grupo Telnet):
+// - manifest_total_value: antes no se mandaba (quedaba en 0). Ahora se
+//   calcula como la suma de price*quantity de cada articulo, en centavos.
+// - external_store_id: antes se mandaba el ID del PEDIDO (incorrecto). Uber
+//   pide un identificador ESTABLE POR SUCURSAL. Ahora se recibe como
+//   parametro separado (externalStoreId) y el ID del pedido se manda en
+//   external_id / manifest_reference (una referencia legible del pedido).
+// - undeliverable_action / deliverable_action: nuevos, valores fijos
+//   recomendados por Uber para este tipo de negocio (restaurante).
+// - dropoff_verification (Pincode): segun la guia oficial de Uber
+//   (https://developer.uber.com/docs/deliveries/guides/pincode), el pincode
+//   lo GENERA Uber automaticamente y se lo manda al cliente por SMS -- no lo
+//   mandamos nosotros, solo se activa con "enabled: true".
+// - pickup_notes / dropoff_notes: nuevos, para instrucciones operativas
+//   (piso, acceso, referencias) en vez de repetir la direccion completa.
+async function crearEntrega({
+  pickup, dropoff, items, referencia, quoteId, testSpecifications, credenciales,
+  externalStoreId, pickupNotes, dropoffNotes, activarPincode,
+}) {
   const token = await obtenerAccessToken(credenciales);
   if (!token) return { exito: false, error: "No se pudo obtener token de Uber Direct" };
 
@@ -181,6 +233,7 @@ async function crearEntrega({ pickup, dropoff, items, referencia, quoteId, testS
     quantity: i.cantidad || 1,
     price: Math.round((i.precio || 0) * 100), // Uber espera centavos
   }));
+  const manifestTotalValue = manifestItems.reduce((suma, i) => suma + (i.price * i.quantity), 0);
 
   const cuerpo = {
     pickup_name: pickup.nombre,
@@ -194,9 +247,16 @@ async function crearEntrega({ pickup, dropoff, items, referencia, quoteId, testS
     dropoff_latitude: dropoff.lat,
     dropoff_longitude: dropoff.lng,
     manifest_items: manifestItems,
+    manifest_total_value: manifestTotalValue,
     manifest_reference: referencia,
-    external_store_id: referencia,
+    external_id: referencia,
+    external_store_id: externalStoreId || referencia, // fallback si no se pasa (no deberia pasar en uso normal)
+    undeliverable_action: "leave_at_door",
+    deliverable_action: "deliverable_action_meet_at_door",
   };
+  if (pickupNotes) cuerpo.pickup_notes = pickupNotes;
+  if (dropoffNotes) cuerpo.dropoff_notes = dropoffNotes;
+  if (activarPincode) cuerpo.dropoff_verification = { pincode: { enabled: true } };
   if (quoteId) cuerpo.quote_id = quoteId;
   if (testSpecifications) cuerpo.test_specifications = testSpecifications;
 
@@ -250,22 +310,42 @@ async function consultarEntrega(deliveryId, credenciales) {
 }
 
 // ── CANCELAR ENTREGA ─────────────────────────────────────────────────────────────
-async function cancelarEntrega(deliveryId, credenciales) {
+// CORREGIDO (26-ago-2026, feedback real de certificacion Uber Direct): antes
+// no se mandaba ningun body -- Uber exige un "cancelation_reason" valido, y
+// si se usa "other" tambien hay que mandar "additional_description".
+// cancelationReason (opcional): string, ej. "wrong_address",
+// "item_unavailable", "other", etc. Si no se especifica, se usa "other" con
+// una descripcion generica.
+async function cancelarEntrega(deliveryId, credenciales, cancelationReason, additionalDescription) {
   const token = await obtenerAccessToken(credenciales);
   if (!token) return { exito: false, error: "No se pudo obtener token de Uber Direct" };
 
   const customerId = process.env.UBER_DIRECT_CUSTOMER_ID;
+  const razon = cancelationReason || "other";
+  const cuerpo = { cancelation_reason: razon };
+  if (razon === "other") {
+    cuerpo.additional_description = additionalDescription || "Cancelado desde Mr. Sushi";
+  }
+  const body = JSON.stringify(cuerpo);
+
   const respuesta = await requestJSON({
     hostname: API_HOSTNAME,
     path: `/v1/customers/${customerId}/deliveries/${deliveryId}/cancel`,
     method: "POST",
-    headers: { "Authorization": `Bearer ${token}`, "Content-Length": 0 },
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`,
+      "Content-Length": Buffer.byteLength(body),
+    },
+    body,
   });
 
-  if (respuesta.statusCode === 200) {
-    return { exito: true };
+  logger.info(`Cancelar entrega Uber Direct -> status: ${respuesta.statusCode}, body: ${respuesta.raw?.substring(0, 300)}`);
+
+  if (respuesta.statusCode === 200 && respuesta.json?.status === "canceled") {
+    return { exito: true, raw: respuesta.json };
   }
-  return { exito: false, error: respuesta.json?.message || `Error ${respuesta.statusCode}` };
+  return { exito: false, error: respuesta.json?.message || `Error ${respuesta.statusCode}`, raw: respuesta.json };
 }
 
 module.exports = { crearCotizacion, crearEntrega, consultarEntrega, cancelarEntrega };

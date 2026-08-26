@@ -106,6 +106,16 @@ async function initDB() {
     // menu distinto o algun otro problema) sin borrarla -- el bot deja de
     // ofrecerla/asignarle pedidos, pero sigue existiendo para referencia.
     await client.query(`ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS activo BOOLEAN DEFAULT TRUE;`);
+    // NUEVO (26-ago-2026, para certificacion Uber Direct): componentes de la
+    // direccion por separado (calle se deriva del texto de "direccion" al
+    // momento de despachar, no hace falta guardarla aparte). Mientras estas
+    // columnas queden NULL, uber_direct.js cae de vuelta a mandar el texto
+    // completo de "direccion" -- no rompe nada mientras no se llenen. Se
+    // llenan corriendo una vez scripts/backfill_direccion_sucursales.js.
+    await client.query(`ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS colonia TEXT;`);
+    await client.query(`ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS municipio TEXT;`);
+    await client.query(`ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS estado_direccion TEXT;`);
+    await client.query(`ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS codigo_postal TEXT;`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS menu_items (
         id SERIAL PRIMARY KEY,
@@ -453,6 +463,18 @@ async function actualizarCoordenadasSucursal(id, lat, lng) {
   await pool.query("UPDATE sucursales SET lat = $1, lng = $2, actualizado = NOW() WHERE id = $3", [lat, lng, id]);
 }
 
+// NUEVO (26-ago-2026, para certificacion Uber Direct): guarda los componentes
+// de direccion de una sucursal (colonia/municipio/estado/CP), usado por
+// scripts/backfill_direccion_sucursales.js. Mientras no se corra ese script,
+// estas columnas quedan NULL y uber_direct.js sigue usando el texto completo
+// de "direccion" (comportamiento identico al de antes, sin riesgo).
+async function actualizarDireccionSucursal(id, { colonia, municipio, estado_direccion, codigo_postal }) {
+  await pool.query(
+    "UPDATE sucursales SET colonia=$1, municipio=$2, estado_direccion=$3, codigo_postal=$4, actualizado=NOW() WHERE id=$5",
+    [colonia || null, municipio || null, estado_direccion || null, codigo_postal || null, id]
+  );
+}
+
 // ── MENU (editable desde el panel) ───────────────────────────────────────────
 
 async function obtenerMenu() {
@@ -605,6 +627,7 @@ module.exports = {
   actualizarSucursal,
   insertarSucursalSiNoExiste,
   actualizarCoordenadasSucursal,
+  actualizarDireccionSucursal,
   obtenerMenu,
   obtenerMenuAdmin,
   crearItemMenu,

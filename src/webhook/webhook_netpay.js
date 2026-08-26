@@ -7,7 +7,7 @@ const router = express.Router();
 const logger = require("../utils/logger");
 const db = require("../db/database");
 const { consultarEstatusTransaccion } = require("../utils/netpay");
-const { crearEntrega } = require("../utils/uber_direct");
+const { crearCotizacion, crearEntrega } = require("../utils/uber_direct");
 const { credencialesPorSucursal } = require("../../config/uber_credenciales");
 
 function getTwilioClient() {
@@ -75,25 +75,33 @@ async function despacharUberDirect(pedido) {
       return { exito: false };
     }
 
+    // CORREGIDO (26-ago-2026, feedback real de certificacion Uber Direct
+    // compartido por Diego de otro proyecto/Grupo Telnet): Uber pide la
+    // direccion ESTRUCTURADA (calle separada de colonia/ciudad/estado/CP).
+    // armarDireccionUber() en uber_direct.js ahora arma esa estructura sola
+    // a partir de estos campos -- si sucursal.municipio/estado_direccion
+    // todavia no estan geocodificados (columnas nuevas, requieren correr
+    // scripts/backfill_direccion_sucursales.js una vez), cae de vuelta
+    // automaticamente al texto completo tal como funcionaba antes, asi que
+    // esto es seguro de desplegar aunque el backfill no se haya corrido.
     const pickup = {
       nombre: sucursal.nombre,
-      calle: sucursal.direccion,
+      direccionCompleta: sucursal.direccion,
+      colonia: sucursal.colonia || null,
+      ciudad: sucursal.municipio || null,
+      estado: sucursal.estado_direccion || null,
+      codigoPostal: sucursal.codigo_postal || null,
       telefono: formatearTelefonoUber(sucursal.telefono),
       lat: Number(sucursal.lat),
       lng: Number(sucursal.lng),
     };
-    // CORREGIDO (confirmado con logs reales, 22-ago-2026): pedido.direccion ya
-    // es la direccion COMPLETA validada por Google Maps (calle, colonia, CP,
-    // municipio y estado, todo en un solo texto). Antes tambien se mandaban
-    // municipio/estado_direccion/codigo_postal por separado, duplicando esos
-    // datos dentro del mismo request -- Uber Direct rechazaba la entrega con
-    // "failed to create location" porque su geocodificador no podia resolver
-    // la direccion con esa informacion repetida/contradictoria. El pickup
-    // (sucursal) nunca tuvo este problema porque nunca mando esos campos por
-    // separado -- aqui se hace lo mismo: solo texto completo + lat/lng.
     const dropoff = {
       nombre: pedido.nombre_cliente || "Cliente Mr. Sushi",
-      calle: pedido.direccion,
+      direccionCompleta: pedido.direccion,
+      colonia: pedido.colonia || null,
+      ciudad: pedido.municipio || null,
+      estado: pedido.estado_direccion || null,
+      codigoPostal: pedido.codigo_postal || null,
       telefono: formatearTelefonoUber((pedido.telefono_cliente || "").replace("whatsapp:", "")),
       lat: pedido.ubicacion_gps.latitude,
       lng: pedido.ubicacion_gps.longitude,
@@ -142,11 +150,33 @@ async function despacharUberDirect(pedido) {
       }
     }
 
+    // CORREGIDO (26-ago-2026, feedback real de certificacion Uber Direct):
+    // el flujo Quote -> Create es OBLIGATORIO para certificacion. Antes se
+    // creaba la entrega directo, sin cotizar primero. Ahora se pide la
+    // cotizacion (mismos pickup/dropoff, misma direccion/telefonos que la
+    // entrega -- paridad exigida por Uber) y se usa el quote_id resultante.
+    // Si la cotizacion falla, no se intenta crear la entrega sin ella.
+    const cotizacion = await crearCotizacion({ pickup, dropoff, credenciales });
+    if (!cotizacion.exito) {
+      logger.error(`Fallo al cotizar entrega de Uber Direct para ${pedido.id}: ${cotizacion.error}`);
+      return { exito: false };
+    }
+
+    // external_store_id: identificador ESTABLE por sucursal (no por pedido,
+    // eso ya se manda aparte en external_id/manifest_reference). Se usa el id
+    // numerico de la sucursal en la base de datos, que no cambia aunque se
+    // renombre la sucursal.
+    const externalStoreId = `sucursal-${sucursal.id}`;
+
     const resultado = await crearEntrega({
       pickup,
       dropoff,
       items: pedido.items,
       referencia: pedido.id,
+      quoteId: cotizacion.quoteId,
+      externalStoreId,
+      dropoffNotes: pedido.referencias || undefined,
+      activarPincode: true,
       testSpecifications: modoPrueba ? { robo_courier_specification: { mode: "auto" } } : undefined,
       credenciales,
     });
