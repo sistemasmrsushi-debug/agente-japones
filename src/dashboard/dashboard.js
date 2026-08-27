@@ -6,6 +6,12 @@ const bcrypt = require("bcryptjs");
 const logger = require("../utils/logger");
 const db = require("../db/database");
 const { crearSesion, cerrarSesion, requireAuth, requireGerente, obtenerSesionesActivas } = require("./auth");
+// CORREGIDO (26-ago-2026, reportado por Diego en una prueba real): el
+// despacho a Uber Direct se movio aqui desde webhook_netpay.js -- antes se
+// disparaba en cuanto se confirmaba el pago, sin esperar a que la cocina
+// aceptara el pedido. Ahora se dispara cuando el pedido pasa a "en_proceso"
+// (la cocina lo acepta), ver el endpoint PATCH /api/pedidos/:id/estado.
+const { despacharUberDirect } = require("../utils/despacho_uber");
 
 // NOTA: Los usuarios y contraseñas ya NO viven aqui hardcodeados.
 // Ahora se administran en la tabla `dashboard_usuarios` de PostgreSQL,
@@ -91,7 +97,23 @@ router.patch("/api/pedidos/:id/estado", requireAuth, async (req, res) => {
     const { estado } = req.body;
     const pedido = await db.actualizarEstadoPedido(id, estado);
     if (!pedido) return res.status(404).json({ error: "No encontrado" });
-    const mensaje = getMensajeSeguimiento(estado, pedido);
+    let mensaje = getMensajeSeguimiento(estado, pedido);
+
+    // CORREGIDO (26-ago-2026, reportado por Diego en una prueba real): el
+    // despacho a Uber Direct se dispara AQUI -- cuando la cocina acepta el
+    // pedido ("en_proceso") -- en vez de en cuanto se confirma el pago. Asi
+    // Uber no busca repartidor hasta que alguien en la sucursal ya sepa del
+    // pedido. El guard de "!pedido.uber_delivery_id" evita despachar dos
+    // veces si alguien marca "en_proceso" mas de una vez por error.
+    if (estado === "en_proceso" && pedido.tipo === "domicilio" && !pedido.uber_delivery_id) {
+      const resultadoUber = await despacharUberDirect(pedido);
+      if (resultadoUber.trackingUrl) {
+        mensaje = (mensaje || "") + `\n\n🛵 Ya estamos buscando tu repartidor. Puedes seguirlo aquí:\n${resultadoUber.trackingUrl}`;
+      } else if (!resultadoUber.exito) {
+        logger.warn(`Pedido ${id} aceptado pero el despacho a Uber Direct fallo -- revisar manualmente.`);
+      }
+    }
+
     if (mensaje && pedido.telefono_cliente)
       await notificarCliente(pedido.telefono_cliente, mensaje);
     res.json(pedido);
