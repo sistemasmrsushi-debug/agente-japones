@@ -62,6 +62,22 @@ function listaSucursalesCorta(sucursalesActivas) {
   return (sucursalesActivas || restaurante.sucursales).map(s => s.nombre).join(", ");
 }
 
+// CORREGIDO (31-ago-2026, reportado por Diego): el system prompt solo le
+// mandaba a la IA los NOMBRES de las sucursales, sin el campo "tipo"
+// (restaurante/hibrido vs fast_food) que ya existe en config/restaurante.js.
+// Sin ese dato, la IA no tenia forma de saber cual sucursal es cual --
+// adivinaba por el nombre (ej. asumia que "Zona Azul Restaurante" es
+// restaurante, cuando en realidad esta marcada como fast_food) y se
+// equivocaba tanto si el cliente preguntaba directamente como al aplicar las
+// promociones que dependen del tipo de sucursal (Barra Libre, Cocteleria
+// 2x1). Ahora se le manda la lista ya separada por tipo, con datos reales.
+function listaSucursalesPorTipo(sucursalesActivas) {
+  const lista = sucursalesActivas || restaurante.sucursales;
+  const restaurantes = lista.filter(s => s.tipo === "restaurante").map(s => s.nombre);
+  const fastFood = lista.filter(s => s.tipo === "fast_food").map(s => s.nombre);
+  return `- Restaurante/Híbrido (con mesas para comer ahí; aplican Barra Libre y Coctelería 2x1): ${restaurantes.join(", ") || "ninguna"}\n- Fast Food (solo para llevar/recoger; NO aplican Barra Libre ni Coctelería 2x1): ${fastFood.join(", ") || "ninguna"}`;
+}
+
 // ── SYSTEM PROMPT ─────────────────────────────────────────────────────────────
 function buildSystemPrompt(sucursalRelevante, sucursalesActivas) {
   let bloqueHorario = "";
@@ -105,6 +121,7 @@ FLUJO DE PEDIDO — sigue este orden estrictamente:
 REGLAS:
 - NUNCA sugieras sucursal sin tener la dirección primero
 - NUNCA inventes precios — usa exactamente los del menú
+- Cuando el cliente pregunte si una sucursal es restaurante/híbrido o fast food (o si aplica alguna promoción que dependa de eso), usa EXACTAMENTE la clasificación de la lista de SUCURSALES de arriba -- nunca lo adivines por el nombre de la sucursal
 - NUNCA mezcles categorías del menú
 - Si el cliente menciona algo que no está en el menú, díselo amablemente
 - Entiende lenguaje informal, errores de tipeo y expresiones mexicanas
@@ -123,7 +140,8 @@ ETIQUETAS DEL SISTEMA (invisibles para el cliente, solo al final del mensaje):
 [NOMBRE]{"nombre_cliente":"NOMBRE_EXACTO"}[/NOMBRE]  <- agrega esta etiqueta la PRIMERA VEZ que el cliente te diga su nombre en la conversacion (sin importar en que paso del flujo estes). No la repitas si ya la mandaste antes en este mismo chat. Puede ir junto con cualquier otra etiqueta o sola.
 
 DOMICILIO: Envío gratis | ~40 min | Sin restricciones de zona
-SUCURSALES: ${listaSucursalesCorta(sucursalesActivas)}
+SUCURSALES:
+${listaSucursalesPorTipo(sucursalesActivas)}
 ${bloqueHorario}
 
 MENÚ COMPLETO (precios exactos, no los modifiques):
