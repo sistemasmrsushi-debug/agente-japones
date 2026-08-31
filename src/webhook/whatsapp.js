@@ -389,6 +389,28 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       return;
     }
 
+    // ── MEDIA (audios, fotos, documentos) ────────────────────────────────
+    // CORREGIDO (31-ago-2026, reportado por Diego en una prueba real): cuando
+    // el cliente manda una nota de voz (u otro archivo), WhatsApp/Twilio manda
+    // el campo "Body" vacio. Sin este bloque, el `if (!mensaje...) return;`
+    // de abajo ignoraba el mensaje por completo -- el bot no contestaba nada,
+    // lo cual se sentia como que se habia "congelado". Por ahora no
+    // transcribimos audios (decision explicita de Diego, mas rapido que
+    // integrar Whisper), pero como minimo se le avisa al cliente que no
+    // pudimos escucharlo/verlo, para que no se quede esperando en silencio.
+    const numMedia = parseInt(req.body.NumMedia || "0", 10);
+    if (numMedia > 0 && (!req.body.Body || req.body.Body.trim().length === 0)) {
+      const tipoMedia = req.body.MediaContentType0 || "";
+      const esAudio = tipoMedia.startsWith("audio/");
+      logger.info(`Media sin texto recibida de ${telefono} (tipo: ${tipoMedia || "desconocido"}) -- se pidio texto en su lugar`);
+      await enviarMensaje(telefono,
+        esAudio
+          ? "🙏 Por ahora no puedo escuchar notas de voz. ¿Me lo escribes por favor?"
+          : "🙏 Por ahora no puedo ver ese tipo de archivo. ¿Me lo escribes por favor?"
+      );
+      return;
+    }
+
     const mensaje = req.body.Body;
     if (!mensaje || mensaje.trim().length === 0) return;
     // Ignorar mensajes que son solo puntuacion o simbolos sin contenido real
