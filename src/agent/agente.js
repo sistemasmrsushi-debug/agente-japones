@@ -110,6 +110,7 @@ FLUJO DE PEDIDO — sigue este orden estrictamente:
    - Si dice "quiero hacer otro pedido" o similar y ya tienes su nombre de este mismo chat, no lo vuelvas a presentar ni a pedir el nombre -- responde ÚNICAMENTE "¡Claro! ¿Qué te gustaría pedir?"
    - En cuanto el cliente te diga su nombre (sea en este paso o en cualquier otro momento de la conversación), captúralo usando la etiqueta [NOMBRE] descrita abajo.
 2. PRODUCTOS: Confirma los platillos con nombre y precio exacto del menú, y pregunta si desea agregar algo más: "¿Algo más o sería todo?". NO preguntes todavía si es para recoger en sucursal o a domicilio -- eso solo se pregunta hasta que el cliente confirme que ya terminó de pedir (dice "eso es todo", "nada más", "ya", "solo eso" o similar), aunque solo haya pedido un producto.
+   - MODIFICACIONES A PLATILLOS: si el cliente pide un cambio razonable a un platillo (quitar un ingrediente, ej. "sin pepino" o "sin cebolla"; cambiar la proteína, ej. "con atún en vez de salmón"; sin alguna salsa; extra de algo), ACÉPTALO con gusto -- NO seas estricto ni le digas que no se puede. Confirma el cambio en tu respuesta (ej. "¡Claro! Tu Sushi Kani Maki sin pepino, va 🍣") y guárdalo tal cual lo pidió el cliente en el campo "modificaciones" de ese item (texto corto, ej. "sin pepino" o "cambiar salmón por atún"). El precio del platillo NO cambia por la modificación. Si el cambio no tiene sentido para ese platillo (ej. pedir "sin arroz" en una sopa) o el cliente pide agregar un ingrediente que no manejamos, entonces sí explícale amablemente que ese cambio en particular no se puede.
 2.1. Cuando el cliente confirme que ya terminó de pedir, ahí sí pregunta: "¿Lo quieres recoger en sucursal o te lo enviamos a domicilio?"
 3. TIPO DE ENTREGA:
    - SUCURSAL: pregunta en cuál sucursal
@@ -123,6 +124,7 @@ REGLAS:
 - NUNCA inventes precios — usa exactamente los del menú
 - Cuando el cliente pregunte si una sucursal es restaurante/híbrido o fast food (o si aplica alguna promoción que dependa de eso), usa EXACTAMENTE la clasificación de la lista de SUCURSALES de arriba -- nunca lo adivines por el nombre de la sucursal
 - NUNCA mezcles categorías del menú
+- Sí acepta modificaciones razonables a un platillo (quitar ingrediente, cambiar proteína, sin salsa, etc.) -- ver MODIFICACIONES A PLATILLOS arriba. No es lo mismo que "mezclar categorías del menú"
 - Si el cliente menciona algo que no está en el menú, díselo amablemente
 - Entiende lenguaje informal, errores de tipeo y expresiones mexicanas
 - Si el cliente confirma con "sí", "va", "dale", "esa mera", "órale", "sale" o similares, tómalo como confirmación
@@ -134,7 +136,7 @@ REGLAS:
 - Las categorías del menú son: Sushi 2x1, Combos, Sushi Box, Entradas, Hand Rolls, Sopas, Brochetas Kushiagues, Ensaladas, Arroz, Rollos Tradicionales, Rollos Especialidades, Bowls, Cocina Caliente, Postres, Bebidas
 
 ETIQUETAS DEL SISTEMA (invisibles para el cliente, solo al final del mensaje):
-[PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"NOMBRE_EXACTO","precio":PRECIO_EXACTO,"cantidad":1}],"tipo":"sucursal|domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"...","nombre_cliente":"..."}}[/PEDIDO]
+[PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"NOMBRE_EXACTO","precio":PRECIO_EXACTO,"cantidad":1,"modificaciones":"sin pepino"}],"tipo":"sucursal|domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"...","nombre_cliente":"..."}}[/PEDIDO]  <- "modificaciones" es OPCIONAL, solo inclúyelo en el item si el cliente pidió un cambio para ese platillo (ver MODIFICACIONES A PLATILLOS arriba). Omite el campo por completo si no pidió ninguno.
 [RESERVACION]{"accion":"REGISTRAR_RESERVACION","reservacion":{"nombre":"...","fecha":"...","hora":"...","personas":0,"sucursal":"..."}}[/RESERVACION]
 [ESCALAR]{"accion":"ESCALAR_HUMANO","motivo":"..."}[/ESCALAR]
 [NOMBRE]{"nombre_cliente":"NOMBRE_EXACTO"}[/NOMBRE]  <- agrega esta etiqueta la PRIMERA VEZ que el cliente te diga su nombre en la conversacion (sin importar en que paso del flujo estes). No la repitas si ya la mandaste antes en este mismo chat. Puede ir junto con cualquier otra etiqueta o sola.
@@ -196,13 +198,17 @@ async function procesarMensaje(historial, mensajeNuevo, sucursalesActivas) {
     let textoRespuesta = response.choices[0].message.content;
     const accion = detectarAccion(textoRespuesta);
 
-    // Corregir precios usando el índice real del menú
+    // Corregir precios usando el índice real del menú. NUEVO (31-ago-2026,
+    // pedido por Diego): se preserva "modificaciones" (ej. "sin pepino",
+    // "cambia el salmon por atun") si el cliente pidio alguna -- antes esta
+    // correccion reconstruia el item desde cero y ese dato se perdia.
     if (accion?.datos?.pedido?.items) {
       accion.datos.pedido.items = accion.datos.pedido.items.map(item => {
         const encontrado = buscarPlatillo(item.nombre);
-        return encontrado
+        const base = encontrado
           ? { nombre: encontrado.nombre, precio: encontrado.precio, cantidad: item.cantidad || 1 }
           : item;
+        return item.modificaciones ? { ...base, modificaciones: item.modificaciones } : base;
       });
     }
 

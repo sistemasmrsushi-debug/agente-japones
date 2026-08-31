@@ -386,7 +386,10 @@ function esUrgente(p) {
 }
 
 function filaP(p) {
-  const items = Array.isArray(p.items) ? p.items.map(i=>`${i.cantidad||1}× ${i.nombre}`).join(', ') : (p.items||'—');
+  // NUEVO (31-ago-2026, pedido por Diego): si el cliente pidio una
+  // modificacion al platillo (ej. "sin pepino", "cambiar salmon por atun"),
+  // se resalta junto al item para que la cocina no se la pierda.
+  const items = Array.isArray(p.items) ? p.items.map(i=>`${i.cantidad||1}× ${i.nombre}${i.modificaciones?` <b style="color:#c0392b">(${i.modificaciones})</b>`:''}`).join(', ') : (p.items||'—');
   const total = Array.isArray(p.items) ? p.items.reduce((s,i)=>s+(i.precio||0)*(i.cantidad||1),0) : '—';
   const fechaObj = new Date(p.fecha);
   const hora = fechaObj.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});

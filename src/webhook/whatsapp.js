@@ -101,6 +101,30 @@ function listaNombres(sucursales) {
   return sucursales.map(s => s.nombre).join(", ");
 }
 
+// NUEVO (31-ago-2026, pedido por Diego): antes el bot era muy estricto y no
+// aceptaba modificaciones a los platillos (ej. "sin pepino", "cambia el
+// salmon por atun"). Ahora la IA puede capturar esa peticion en el campo
+// "modificaciones" de cada item (ver agente.js). Esta funcion reemplaza las
+// varias normalizaciones sueltas que corregian nombre/precio contra el
+// indice real del menu -- todas reconstruian el objeto del item desde cero y
+// por eso perdian el campo "modificaciones" si no se preservaba a proposito.
+function normalizarItemsPedido(items) {
+  return (items || []).map(i => {
+    const real = buscarPlatillo(i.nombre);
+    const base = real ? { nombre: real.nombre, precio: real.precio, cantidad: i.cantidad || 1 } : i;
+    return i.modificaciones ? { ...base, modificaciones: i.modificaciones } : base;
+  });
+}
+
+// Arma la linea de texto de un item para los mensajes de confirmacion,
+// incluyendo la modificacion si el cliente pidio alguna -- sin esto, aunque
+// la IA la capturara, ni el cliente ni (mas importante) la cocina se
+// enteraban de que el platillo debia prepararse distinto.
+function formatearItemTexto(i) {
+  const base = `${i.cantidad || 1}x ${i.nombre} ($${i.precio})`;
+  return i.modificaciones ? `${base} — ${i.modificaciones}` : base;
+}
+
 // Decide la sucursal final que atendera un domicilio, respetando un radio maximo
 // de entrega. Mantiene el sistema de palabras clave (zonaSugerida) como primer
 // intento -- solo busca alternativas si esa sucursal queda demasiado lejos.
@@ -212,10 +236,7 @@ async function crearPedidoDomicilioYPedirPago(telefono, opts) {
   let items = opts.items && opts.items.length > 0
     ? opts.items
     : extraerItemsConPreciosReales(await db.obtenerHistorial(telefono));
-  items = items.map(item => {
-    const real = buscarPlatillo(item.nombre);
-    return real ? { nombre: real.nombre, precio: real.precio, cantidad: item.cantidad || 1 } : item;
-  });
+  items = normalizarItemsPedido(items);
 
   const pedido = {
     id: `PED-${Date.now()}`,
@@ -261,7 +282,7 @@ async function crearPedidoDomicilioYPedirPago(telefono, opts) {
   }
 
   const total = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
-  const itemsTexto = items.map(i => `${i.cantidad || 1}x ${i.nombre} ($${i.precio})`).join("\n");
+  const itemsTexto = items.map(formatearItemTexto).join("\n");
 
   const resultadoPago = await generarLinkPago({
     items,
@@ -635,10 +656,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         // vez de reescribir la direccion, el bot pueda completar el pedido con
         // geocodificacion inversa en vez de perder todo el contexto.
         const itemsParaFallback = resultado.datos?.pedido?.items
-          ? resultado.datos.pedido.items.map(i => {
-              const real = buscarPlatillo(i.nombre);
-              return real ? { nombre: real.nombre, precio: real.precio, cantidad: i.cantidad || 1 } : i;
-            })
+          ? normalizarItemsPedido(resultado.datos.pedido.items)
           : extraerItemsConPreciosReales(resultado.historialActualizado);
         await db.guardarEstadoPedido(telefono, {
           fase: "esperando_direccion",
@@ -656,10 +674,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
 
       if (zona) {
         const items = resultado.datos?.pedido?.items
-          ? resultado.datos.pedido.items.map(i => {
-              const real = buscarPlatillo(i.nombre);
-              return real ? { nombre: real.nombre, precio: real.precio, cantidad: i.cantidad || 1 } : i;
-            })
+          ? normalizarItemsPedido(resultado.datos.pedido.items)
           : extraerItemsConPreciosReales(resultado.historialActualizado);
 
         // Filtro de radio de entrega, igual que en el CASO 2.
@@ -769,10 +784,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
 
       await db.guardarEstadoPedido(telefono, {
         fase: sucursalEnTexto ? "esperando_confirmacion_sucursal" : "esperando_direccion",
-        items: items.map(i => {
-          const real = buscarPlatillo(i.nombre);
-          return real ? { nombre: real.nombre, precio: real.precio, cantidad: i.cantidad || 1 } : i;
-        }),
+        items: normalizarItemsPedido(items),
         sucursal_sugerida: sucursalEnTexto?.nombre || null,
         nombre_cliente: estado?.nombre_cliente || null,
         direccion: null,
@@ -821,10 +833,7 @@ async function ejecutarAccion(accion, datos, telefono) {
         return;
       }
 
-      const items = (datos.pedido?.items || []).map(i => {
-        const real = buscarPlatillo(i.nombre);
-        return real ? { nombre: real.nombre, precio: real.precio, cantidad: i.cantidad || 1 } : i;
-      });
+      const items = normalizarItemsPedido(datos.pedido?.items);
 
       // ── DOMICILIO: SIEMPRE debe pasar por pago, sin importar por cual de
       // los dos caminos (maquina de estados o esta etiqueta de la IA) llegue
@@ -899,7 +908,7 @@ async function ejecutarAccion(accion, datos, telefono) {
         }).catch(e => logger.error("Error guardando direccion del cliente: " + e.message));
 
         const totalDomicilio = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
-        const itemsTextoDomicilio = items.map(i => `${i.cantidad || 1}x ${i.nombre} ($${i.precio})`).join("\n");
+        const itemsTextoDomicilio = items.map(formatearItemTexto).join("\n");
 
         const resultadoPago = await generarLinkPago({
           items,
@@ -944,7 +953,7 @@ async function ejecutarAccion(accion, datos, telefono) {
       await db.guardarPedido(pedido);
       logger.info(`Pedido en DB: ${pedido.id} -> ${pedido.sucursal}`);
       const total = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
-      const itemsTexto = items.map(i => `${i.cantidad || 1}x ${i.nombre} ($${i.precio})`).join("\n");
+      const itemsTexto = items.map(formatearItemTexto).join("\n");
       await enviarMensaje(telefono,
         `🍣 ¡Pedido registrado!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\nTotal: $${total}\nSucursal: ${pedido.sucursal}\n\n⏱️ Tiempo: ~40 min.`
       );

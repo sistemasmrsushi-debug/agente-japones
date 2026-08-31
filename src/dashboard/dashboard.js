@@ -21,7 +21,7 @@ const { despacharUberDirect } = require("../utils/despacho_uber");
 function getMensajeSeguimiento(estado, pedido) {
   const sucursal = pedido.sucursal || "Mr. Sushi";
   const items = Array.isArray(pedido.items)
-    ? pedido.items.map(i => `- ${i.cantidad||1}x ${i.nombre}`).join("\n") : "";
+    ? pedido.items.map(i => `- ${i.cantidad||1}x ${i.nombre}${i.modificaciones ? ` (${i.modificaciones})` : ""}`).join("\n") : "";
   const msgs = {
     en_proceso: `🍣 Mr. Sushi - Tu pedido está en preparación\n\n¡Hola! Tu pedido en ${sucursal} ya está en preparación. 👨‍🍳\n\n${items}\n\n¡Gracias por tu paciencia!`,
     listo:      `✅ Mr. Sushi - ¡Tu pedido está listo!\n\n¡Hola! Tu pedido en ${sucursal} ya está listo.\n\n${items}\n\n¡Te esperamos! 🍣`,
