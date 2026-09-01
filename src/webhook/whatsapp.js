@@ -72,6 +72,37 @@ function pideDomicilio(texto) {
   return /\b(domicilio|a mi casa|a casa|delivery|me lo llevan|me traen|enviar|envio a)\b/.test(t);
 }
 
+// ── Detecta si el cliente pide factura ─────────────────────────────────────────
+// CORREGIDO (31-ago-2026, reportado por Diego con captura real): la liga de
+// facturacion vivia solo en el prompt de la IA, con instrucciones de
+// "responde exactamente esto". En la practica, gpt-4o-mini no lo respetaba al
+// pie de la letra -- envolvia la liga en formato Markdown [texto](url), que
+// WhatsApp NO renderiza como link, asi que al cliente le aparecia como texto
+// roto ("[https://...](https://...)"), pareciendo un error. La liga en si
+// siempre fue la correcta. Para que esto nunca vuelva a fallar (sin depender
+// de que el modelo copie bien un texto), el mensaje de facturacion ahora se
+// manda tal cual desde el codigo en cuanto se detecta la peticion, sin pasar
+// por la IA. El bloque de FACTURACION que sigue en agente.js se deja como
+// respaldo, por si el cliente lo pide con palabras que este detector no cubra.
+function esPeticionFactura(texto) {
+  const t = texto.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  return /factur|\bcfdi\b/.test(t);
+}
+
+const MENSAJE_FACTURACION = `Puedes generar tu factura directamente aquí:
+🧾 https://externo.grupotelnet.com.mx:9308/facturar/
+
+Ten a la mano:
+• Foto de tu nota o ticket de compra
+• RFC o Constancia de Situación Fiscal
+• Nombre o Razón Social
+• Código Postal fiscal
+• Régimen Fiscal
+
+Si tienes algún problema para generarla ahí, contáctanos por WhatsApp: 56 1109 7561
+
+¿Hay algo más en que te pueda ayudar?`;
+
 // ── Detecta si el mensaje tiene una direccion ─────────────────────────────────
 function tieneDireccion(texto) {
   if (/\b(calle|avenida|av[. ]|col[. ]|colonia|blvd|calzada|privada|cerrada|circuito|fracc|\d{5})\b/i.test(texto)) {
@@ -478,6 +509,15 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         );
         logger.error(`Fallo generacion de link de pago (reintento) para ${pedidoPendiente.id}: ${resultadoPago.error}`);
       }
+      return;
+    }
+
+    // ── CASO 0.5: Cliente pide factura ─────────────────────────────────────
+    // Se manda tal cual desde el codigo (ver esPeticionFactura arriba) en vez
+    // de dejar que la IA la redacte, para que la liga nunca salga envuelta en
+    // formato Markdown que WhatsApp no renderiza.
+    if (esPeticionFactura(mensaje)) {
+      await enviarMensaje(telefono, MENSAJE_FACTURACION);
       return;
     }
 
