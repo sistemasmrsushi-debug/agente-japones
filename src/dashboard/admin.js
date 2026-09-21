@@ -149,4 +149,71 @@ router.delete("/api/admin/usuarios/:usuario", requireGerente, async (req, res) =
   }
 });
 
+// ── CUPONES (campañas de descuento) ─────────────────────────────────────────
+// El codigo NO es editable una vez creado (mismo criterio que el nombre de
+// sucursal arriba: si ya se repartio/publico un codigo, cambiarlo aqui lo
+// rompe). Para "borrarlo" se desactiva con el checkbox "Activo" -- asi no se
+// pierde su historial de usos.
+
+router.get("/api/admin/cupones", requireGerente, async (req, res) => {
+  try {
+    const cupones = await db.obtenerCupones();
+    res.json(cupones);
+  } catch (err) {
+    logger.error("Error obteniendo cupones: " + err.message);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
+router.post("/api/admin/cupones", requireGerente, async (req, res) => {
+  try {
+    const { codigo, porcentaje, fecha_inicio, fecha_fin, usos_maximos } = req.body;
+    if (!codigo || !codigo.trim())
+      return res.status(400).json({ error: "El código es obligatorio" });
+    if (porcentaje === undefined || isNaN(Number(porcentaje)) || Number(porcentaje) <= 0 || Number(porcentaje) > 100)
+      return res.status(400).json({ error: "El porcentaje debe ser un número entre 1 y 100" });
+    if (fecha_inicio && fecha_fin && fecha_fin < fecha_inicio)
+      return res.status(400).json({ error: "La fecha de fin no puede ser antes que la fecha de inicio" });
+    if (usos_maximos !== undefined && usos_maximos !== null && usos_maximos !== "" &&
+        (isNaN(Number(usos_maximos)) || Number(usos_maximos) <= 0 || !Number.isInteger(Number(usos_maximos))))
+      return res.status(400).json({ error: "El límite de usos debe ser un número entero positivo" });
+
+    const existente = await db.obtenerCuponPorCodigo(codigo.trim());
+    if (existente) return res.status(409).json({ error: "Ese código ya existe" });
+
+    const nuevo = await db.crearCupon({
+      codigo: codigo.trim(),
+      porcentaje,
+      fecha_inicio: fecha_inicio || null,
+      fecha_fin: fecha_fin || null,
+      usos_maximos: usos_maximos || null,
+    });
+    res.json(nuevo);
+  } catch (err) {
+    logger.error("Error creando cupon: " + err.message);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
+router.put("/api/admin/cupones/:codigo", requireGerente, async (req, res) => {
+  try {
+    const { codigo } = req.params;
+    const { porcentaje, fecha_inicio, fecha_fin, usos_maximos, activo } = req.body;
+    if (porcentaje !== undefined && (isNaN(Number(porcentaje)) || Number(porcentaje) <= 0 || Number(porcentaje) > 100))
+      return res.status(400).json({ error: "El porcentaje debe ser un número entre 1 y 100" });
+    if (fecha_inicio && fecha_fin && fecha_fin < fecha_inicio)
+      return res.status(400).json({ error: "La fecha de fin no puede ser antes que la fecha de inicio" });
+    if (usos_maximos !== undefined && usos_maximos !== null && usos_maximos !== "" &&
+        (isNaN(Number(usos_maximos)) || Number(usos_maximos) <= 0 || !Number.isInteger(Number(usos_maximos))))
+      return res.status(400).json({ error: "El límite de usos debe ser un número entero positivo" });
+
+    const cupon = await db.actualizarCupon(codigo, { porcentaje, fecha_inicio, fecha_fin, usos_maximos, activo });
+    if (!cupon) return res.status(404).json({ error: "Cupón no encontrado o sin cambios válidos" });
+    res.json(cupon);
+  } catch (err) {
+    logger.error("Error actualizando cupon: " + err.message);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
 module.exports = router;

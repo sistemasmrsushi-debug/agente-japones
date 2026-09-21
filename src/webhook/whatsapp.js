@@ -8,6 +8,7 @@ const db = require("../db/database");
 const { validarDireccion, calcularDistanciaKm, geocodificarInverso } = require("../utils/geocoding");
 const { generarLinkPago } = require("../utils/netpay");
 const { estaAbierto, textoHorario } = require("../utils/horario");
+const { validarCupon, calcularDescuento } = require("../utils/cupones");
 
 function getTwilioClient() {
   return require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -156,6 +157,33 @@ function formatearItemTexto(i) {
   return i.modificaciones ? `${base} — ${i.modificaciones}` : base;
 }
 
+// NUEVO (21-sep-2026, pedido por Diego): cupones de descuento. Valida (si el
+// cliente dio uno) el codigo contra la base de datos y calcula cuanto
+// descuento le toca sobre el total. Un codigo invalido/expirado/agotado NO
+// bloquea el pedido -- se avisa al cliente y el pedido sigue a precio
+// completo, igual que cuando un platillo no se encuentra en el menu.
+async function resolverCuponPedido(telefono, codigoCupon, totalBase) {
+  if (!codigoCupon) return { cupon: null, descuentoMonto: 0 };
+  const resultado = await validarCupon(codigoCupon);
+  if (!resultado.valido) {
+    logger.info(`Cupón inválido para ${telefono}: ${resultado.motivo}`);
+    await enviarMensaje(telefono, `⚠️ ${resultado.motivo} Tu pedido continúa sin el descuento.`);
+    return { cupon: null, descuentoMonto: 0 };
+  }
+  const descuentoMonto = calcularDescuento(totalBase, resultado.cupon.porcentaje);
+  logger.info(`Cupón "${resultado.cupon.codigo}" aplicado para ${telefono}: -$${descuentoMonto} (${resultado.cupon.porcentaje}% de $${totalBase})`);
+  return { cupon: resultado.cupon, descuentoMonto };
+}
+
+// Arma las lineas de "Total" de los mensajes de confirmacion, mostrando el
+// desglose (Subtotal/Descuento/Total) solo cuando de verdad se aplico un
+// cupon -- si no hay descuento, se ve exactamente igual que antes.
+function lineasTotal(totalBase, cupon, descuentoMonto) {
+  if (!cupon || !descuentoMonto || descuentoMonto <= 0) return `Total: $${totalBase}`;
+  const totalFinal = Math.round((totalBase - descuentoMonto) * 100) / 100;
+  return `Subtotal: $${totalBase}\nDescuento (${cupon.codigo} -${Number(cupon.porcentaje)}%): -$${descuentoMonto}\nTotal: $${totalFinal}`;
+}
+
 // Decide la sucursal final que atendera un domicilio, respetando un radio maximo
 // de entrega. Mantiene el sistema de palabras clave (zonaSugerida) como primer
 // intento -- solo busca alternativas si esa sucursal queda demasiado lejos.
@@ -269,10 +297,18 @@ async function crearPedidoDomicilioYPedirPago(telefono, opts) {
     : extraerItemsConPreciosReales(await db.obtenerHistorial(telefono));
   items = normalizarItemsPedido(items);
 
+  const totalBase = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
+  const { cupon, descuentoMonto } = await resolverCuponPedido(telefono, opts.cupon, totalBase);
+  const totalFinal = Math.round((totalBase - descuentoMonto) * 100) / 100;
+
   const pedido = {
     id: `PED-${Date.now()}`,
     fecha: new Date().toISOString(),
-    estado: "pendiente_pago",
+    // Si el cupon cubre el 100% (totalFinal <= 0), Netpay no puede cobrar $0
+    // -- el pedido se marca "pendiente" (pagado) directo, igual que un
+    // pedido de sucursal que se paga en persona, en vez de esperar un pago
+    // que nunca se va a pedir.
+    estado: totalFinal <= 0 ? "pendiente" : "pendiente_pago",
     telefono_cliente: telefono,
     nombre_cliente: opts.nombreCliente || null,
     sucursal: opts.sucursal,
@@ -289,11 +325,15 @@ async function crearPedidoDomicilioYPedirPago(telefono, opts) {
       longitude: opts.coords.lng,
       maps_url: opts.mapsUrl || `https://maps.google.com/?q=${opts.coords.lat},${opts.coords.lng}`
     } : null,
+    cupon_codigo: cupon?.codigo || null,
+    descuento_porcentaje: cupon?.porcentaje || null,
+    descuento_monto: descuentoMonto || null,
   };
   await db.guardarPedido(pedido);
   await db.eliminarEstadoPedido(telefono);
   await db.guardarHistorial(telefono, []);
-  logger.info(`Pedido pre-registrado (pendiente de pago): ${pedido.id} -> ${pedido.sucursal}`);
+  logger.info(`Pedido pre-registrado (${pedido.estado}): ${pedido.id} -> ${pedido.sucursal}`);
+  if (cupon) await db.incrementarUsoCupon(cupon.codigo).catch(e => logger.error("Error incrementando uso de cupon: " + e.message));
 
   // Recordar esta direccion para el proximo pedido del mismo telefono (ver
   // tabla "clientes"). No bloquea el flujo si falla -- es una mejora de
@@ -312,8 +352,16 @@ async function crearPedidoDomicilioYPedirPago(telefono, opts) {
     }).catch(e => logger.error("Error guardando direccion del cliente: " + e.message));
   }
 
-  const total = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
   const itemsTexto = items.map(formatearItemTexto).join("\n");
+  const totalTexto = lineasTotal(totalBase, cupon, descuentoMonto);
+
+  // Cupon de 100%: no hay nada que cobrar, se confirma directo sin link de pago.
+  if (totalFinal <= 0) {
+    await enviarMensaje(telefono,
+      `🍣 ¡Tu pedido está confirmado!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\n${totalTexto}\nSucursal: ${pedido.sucursal}\nDirección: ${pedido.direccion}\n\n🎉 ¡Tu cupón cubre el 100%, no necesitas pagar nada!`
+    );
+    return;
+  }
 
   const resultadoPago = await generarLinkPago({
     items,
@@ -325,11 +373,13 @@ async function crearPedidoDomicilioYPedirPago(telefono, opts) {
     municipio: pedido.municipio,
     estadoDireccion: pedido.estado_direccion,
     codigoPostal: pedido.codigo_postal,
+    descuentoMonto,
+    cuponCodigo: cupon?.codigo,
   });
 
   if (resultadoPago.exito) {
     await enviarMensaje(telefono,
-      `🍣 ¡Tu pedido está listo para confirmar!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\nTotal: $${total}\nSucursal: ${pedido.sucursal}\nDirección: ${pedido.direccion}\n\n💳 Para confirmar tu pedido realiza tu pago aquí:\n${resultadoPago.linkPago}\n\n⏱️ Tienes 15 minutos para completar el pago.`
+      `🍣 ¡Tu pedido está listo para confirmar!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\n${totalTexto}\nSucursal: ${pedido.sucursal}\nDirección: ${pedido.direccion}\n\n💳 Para confirmar tu pedido realiza tu pago aquí:\n${resultadoPago.linkPago}\n\n⏱️ Tienes 15 minutos para completar el pago.`
     );
     // Recordatorio a los 10 minutos si sigue sin pagar
     setTimeout(async () => {
@@ -493,6 +543,11 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         municipio: pedidoPendiente.municipio,
         estadoDireccion: pedidoPendiente.estado_direccion,
         codigoPostal: pedidoPendiente.codigo_postal,
+        // Si el pedido original ya tenia un cupon aplicado, el nuevo link
+        // debe conservar el mismo descuento -- si no, el reintento cobraria
+        // precio completo aunque el cliente ya haya "gastado" su cupon.
+        descuentoMonto: pedidoPendiente.descuento_monto ? Number(pedidoPendiente.descuento_monto) : 0,
+        cuponCodigo: pedidoPendiente.cupon_codigo,
       });
 
       if (resultadoPago.exito) {
@@ -637,6 +692,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         referencias: estado.referencias,
         coords: estado.coords,
         mapsUrl: estado.maps_url,
+        cupon: estado.cupon,
       });
       return;
     }
@@ -702,6 +758,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
           fase: "esperando_direccion",
           items: itemsParaFallback,
           nombre_cliente: resultado.nombreCliente || estado?.nombre_cliente || null,
+          cupon: resultado.datos?.pedido?.cupon || resultado.cuponCodigo || estado?.cupon || null,
         });
         await enviarMensaje(telefono,
           `No pudimos confirmar esa dirección. Puedes intentar de nuevo con calle, número, colonia y municipio, o compartir tu ubicación en tiempo real 📍 (icono del clip 📎 de WhatsApp → "Ubicación").`
@@ -740,6 +797,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
           fase: "esperando_confirmacion_sucursal",
           sucursal_sugerida: sucursalFinal,
           nombre_cliente: resultado.nombreCliente || estado?.nombre_cliente || null,
+          cupon: resultado.datos?.pedido?.cupon || resultado.cuponCodigo || estado?.cupon || null,
           items,
           direccion: dirFinal,
           colonia: geoResult.colonia || null,
@@ -785,6 +843,16 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       logger.info(`Nombre del cliente guardado para ${telefono}: ${resultado.nombreCliente}`);
     }
 
+    // Igual que con el nombre: el cupon se guarda en cuanto el agente lo
+    // detecta (etiqueta [CUPON] de agente.js), sin importar en que paso del
+    // flujo este, para que llegue hasta el pedido final aunque el cliente lo
+    // haya mencionado varios turnos antes de confirmar.
+    if (resultado.cuponCodigo && resultado.cuponCodigo !== estado?.cupon) {
+      estado = { ...(estado || {}), cupon: resultado.cuponCodigo };
+      await db.guardarEstadoPedido(telefono, estado);
+      logger.info(`Cupón guardado para ${telefono}: ${resultado.cuponCodigo}`);
+    }
+
     // Detectar si el agente esta pidiendo la direccion al cliente
     const textoBajo = resultado.texto.toLowerCase();
     const pidioDir = /direcci[oó]n|colonia|referencia/.test(textoBajo);
@@ -827,6 +895,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         items: normalizarItemsPedido(items),
         sucursal_sugerida: sucursalEnTexto?.nombre || null,
         nombre_cliente: estado?.nombre_cliente || null,
+        cupon: estado?.cupon || null,
         direccion: null,
         direccion_guardada: direccionGuardada,
       });
@@ -845,6 +914,12 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       // mensaje real de ejecutarAccion con el ID/detalle/link de pago. Ese
       // primer mensaje era pura redundancia (ejecutarAccion ya manda el
       // mensaje definitivo), asi que ya no se envia resultado.texto en este caso.
+      // Si el cupon se capturo en un turno anterior (guardado en "estado") pero
+      // el modelo no lo repitio dentro del JSON de [PEDIDO] en este turno, se
+      // usa el guardado -- no depender de que la IA lo recuerde perfecto.
+      if (resultado.datos?.pedido && !resultado.datos.pedido.cupon && estado?.cupon) {
+        resultado.datos.pedido.cupon = estado.cupon;
+      }
       await ejecutarAccion(resultado.accion, resultado.datos, telefono);
       await db.eliminarEstadoPedido(telefono);
     } else {
@@ -892,6 +967,7 @@ async function ejecutarAccion(accion, datos, telefono) {
             fase: "esperando_direccion",
             items,
             nombre_cliente: datos.pedido?.nombre_cliente || null,
+            cupon: datos.pedido?.cupon || null,
           });
           await enviarMensaje(telefono,
             `No pudimos confirmar tu dirección (${direccionCliente}). Puedes intentar de nuevo con calle, número, colonia y municipio, o compartir tu ubicación en tiempo real 📍 (icono del clip 📎 de WhatsApp → "Ubicación").`
@@ -909,10 +985,15 @@ async function ejecutarAccion(accion, datos, telefono) {
           return;
         }
 
+        const totalDomicilio = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
+        const { cupon, descuentoMonto } = await resolverCuponPedido(telefono, datos.pedido?.cupon, totalDomicilio);
+        const totalFinalDomicilio = Math.round((totalDomicilio - descuentoMonto) * 100) / 100;
+
         const pedido = {
           id: `PED-${Date.now()}`,
           fecha: new Date().toISOString(),
-          estado: "pendiente_pago",
+          // Cupon de 100%: no hay nada que cobrar via Netpay, se marca pagado directo.
+          estado: totalFinalDomicilio <= 0 ? "pendiente" : "pendiente_pago",
           telefono_cliente: telefono,
           nombre_cliente: datos.pedido?.nombre_cliente || null,
           sucursal: resolucion.sucursal,
@@ -929,9 +1010,13 @@ async function ejecutarAccion(accion, datos, telefono) {
             longitude: geoResult.coords.lng,
             maps_url: geoResult.maps_url || null,
           } : null,
+          cupon_codigo: cupon?.codigo || null,
+          descuento_porcentaje: cupon?.porcentaje || null,
+          descuento_monto: descuentoMonto || null,
         };
         await db.guardarPedido(pedido);
-        logger.info(`Pedido pre-registrado (pendiente de pago, via IA): ${pedido.id} -> ${pedido.sucursal}`);
+        logger.info(`Pedido pre-registrado (${pedido.estado}, via IA): ${pedido.id} -> ${pedido.sucursal}`);
+        if (cupon) await db.incrementarUsoCupon(cupon.codigo).catch(e => logger.error("Error incrementando uso de cupon: " + e.message));
 
         // Igual que en crearPedidoDomicilioYPedirPago: recordar esta direccion
         // para ofrecerla en el proximo pedido del mismo telefono.
@@ -947,8 +1032,15 @@ async function ejecutarAccion(accion, datos, telefono) {
           maps_url: pedido.ubicacion_gps?.maps_url || null,
         }).catch(e => logger.error("Error guardando direccion del cliente: " + e.message));
 
-        const totalDomicilio = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
         const itemsTextoDomicilio = items.map(formatearItemTexto).join("\n");
+        const totalTextoDomicilio = lineasTotal(totalDomicilio, cupon, descuentoMonto);
+
+        if (totalFinalDomicilio <= 0) {
+          await enviarMensaje(telefono,
+            `🍣 ¡Tu pedido está confirmado!\n\nID: ${pedido.id}\n\n${itemsTextoDomicilio}\n\n${totalTextoDomicilio}\nSucursal: ${pedido.sucursal}\nDirección: ${pedido.direccion}\n\n🎉 ¡Tu cupón cubre el 100%, no necesitas pagar nada!`
+          );
+          return;
+        }
 
         const resultadoPago = await generarLinkPago({
           items,
@@ -960,11 +1052,13 @@ async function ejecutarAccion(accion, datos, telefono) {
           municipio: pedido.municipio,
           estadoDireccion: pedido.estado_direccion,
           codigoPostal: pedido.codigo_postal,
+          descuentoMonto,
+          cuponCodigo: cupon?.codigo,
         });
 
         if (resultadoPago.exito) {
           await enviarMensaje(telefono,
-            `🍣 ¡Tu pedido está listo para confirmar!\n\nID: ${pedido.id}\n\n${itemsTextoDomicilio}\n\nTotal: $${totalDomicilio}\nSucursal: ${pedido.sucursal}\nDirección: ${pedido.direccion}\n\n💳 Para confirmar tu pedido realiza tu pago aquí:\n${resultadoPago.linkPago}\n\n⏱️ Tienes 15 minutos para completar el pago.`
+            `🍣 ¡Tu pedido está listo para confirmar!\n\nID: ${pedido.id}\n\n${itemsTextoDomicilio}\n\n${totalTextoDomicilio}\nSucursal: ${pedido.sucursal}\nDirección: ${pedido.direccion}\n\n💳 Para confirmar tu pedido realiza tu pago aquí:\n${resultadoPago.linkPago}\n\n⏱️ Tienes 15 minutos para completar el pago.`
           );
         } else {
           await enviarMensaje(telefono,
@@ -976,6 +1070,9 @@ async function ejecutarAccion(accion, datos, telefono) {
       }
 
       // ── SUCURSAL (recoger): se paga en persona, no exige link de pago.
+      const totalSucursal = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
+      const { cupon: cuponSucursal, descuentoMonto: descuentoSucursal } = await resolverCuponPedido(telefono, datos.pedido?.cupon, totalSucursal);
+
       const pedido = {
         id: `PED-${Date.now()}`,
         fecha: new Date().toISOString(),
@@ -989,13 +1086,17 @@ async function ejecutarAccion(accion, datos, telefono) {
         colonia: null,
         referencias: null,
         ubicacion_gps: null,
+        cupon_codigo: cuponSucursal?.codigo || null,
+        descuento_porcentaje: cuponSucursal?.porcentaje || null,
+        descuento_monto: descuentoSucursal || null,
       };
       await db.guardarPedido(pedido);
       logger.info(`Pedido en DB: ${pedido.id} -> ${pedido.sucursal}`);
-      const total = items.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
+      if (cuponSucursal) await db.incrementarUsoCupon(cuponSucursal.codigo).catch(e => logger.error("Error incrementando uso de cupon: " + e.message));
       const itemsTexto = items.map(formatearItemTexto).join("\n");
+      const totalTextoSucursal = lineasTotal(totalSucursal, cuponSucursal, descuentoSucursal);
       await enviarMensaje(telefono,
-        `🍣 ¡Pedido registrado!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\nTotal: $${total}\nSucursal: ${pedido.sucursal}\n\n⏱️ Tiempo: ~40 min.`
+        `🍣 ¡Pedido registrado!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\n${totalTextoSucursal}\nSucursal: ${pedido.sucursal}\n\n⏱️ Tiempo: ~40 min.`
       );
     } else if (accion === "REGISTRAR_RESERVACION") {
       const reservacion = {

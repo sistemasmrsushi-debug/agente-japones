@@ -49,11 +49,26 @@ function estadoAIso(nombreEstado) {
 //    letras y numeros bloquearia direcciones reales como "Av. Reforma #123".
 const CAMPO_VALIDO_REGEX = /^[a-zA-Z0-9À-ÿñÑ\s.,#\-\/]+$/;
 
+// NOTA (21-sep-2026, cupones de descuento): antes esta funcion exigia que
+// CADA renglon fuera > $0. Ahora que un cupon puede agregar un renglon de
+// "Descuento" con monto negativo (ver generarLinkPago), la regla cambia a:
+// ningun producto real puede ser <= $0, pero el renglon de descuento si
+// puede ser negativo -- lo que nunca puede pasar es que el TOTAL final
+// quede en $0 o menos (Netpay no permite cobrar $0; para un cupon de 100%
+// el pedido se marca pagado directo sin pasar por aqui, ver whatsapp.js).
 function validarLineItems(lineItems) {
+  let total = 0;
   for (const item of lineItems) {
-    if (!item.amount || Number(item.amount) <= 0) {
-      return `El producto "${item.name}" tiene un monto invalido ($${item.amount}). No se permite generar un link de pago con monto $0 o negativo.`;
+    if (item.amount === undefined || item.amount === null || Number(item.amount) === 0) {
+      return `El producto "${item.name}" tiene un monto invalido ($${item.amount}).`;
     }
+    if (Number(item.amount) < 0 && !item.name.startsWith("Descuento")) {
+      return `El producto "${item.name}" tiene un monto negativo invalido ($${item.amount}).`;
+    }
+    total += Number(item.amount) * (item.quantity || 1);
+  }
+  if (total <= 0) {
+    return `El total del pedido despues del descuento quedo en $${total.toFixed(2)}, invalido para Netpay (debe ser mayor a $0).`;
   }
   return null;
 }
@@ -81,7 +96,7 @@ function validarBilling(billing) {
 }
 
 // ── GENERAR LINK DE PAGO ──────────────────────────────────────────────────────
-async function generarLinkPago({ items, referencia, telefono, nombreCliente, direccion, colonia, municipio, estadoDireccion, codigoPostal, secretKey, emailFacturacionOverride }) {
+async function generarLinkPago({ items, referencia, telefono, nombreCliente, direccion, colonia, municipio, estadoDireccion, codigoPostal, secretKey, emailFacturacionOverride, descuentoMonto, cuponCodigo }) {
   return new Promise((resolve, reject) => {
     const key = secretKey || process.env.NETPAY_SECRET_KEY;
 
@@ -100,6 +115,19 @@ async function generarLinkPago({ items, referencia, telefono, nombreCliente, dir
       quantity: i.cantidad || 1,
       currency: "MXN",
     }));
+
+    // Cupon de descuento (opcional): se manda a Netpay como un renglon mas,
+    // con monto negativo, para que el total que se cobra en el checkout ya
+    // venga descontado -- asi el cliente ve reflejado el descuento en el
+    // propio resumen de pago de Netpay, no solo en el mensaje de WhatsApp.
+    if (descuentoMonto && Number(descuentoMonto) > 0) {
+      lineItems.push({
+        name: `Descuento (${cuponCodigo || "cupón"})`,
+        amount: -Math.abs(Number(descuentoMonto)),
+        quantity: 1,
+        currency: "MXN",
+      });
+    }
 
     // Telefono limpio, sin el prefijo "whatsapp:"
     const telefonoLimpio = (telefono || "").replace("whatsapp:", "").replace("+", "");

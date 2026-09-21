@@ -119,12 +119,15 @@ FLUJO DE PEDIDO — sigue este orden estrictamente:
 5. El sistema detectará automáticamente la sucursal más cercana.
 6. CONFIRMAR: cuando ya tengas nombre del cliente Y sucursal confirmada, genera la etiqueta [PEDIDO] incluyendo el nombre en el campo "nombre_cliente". Si por alguna razón excepcional todavía no tienes su nombre en este punto (ej. no lo diste al inicio), pregunta "¿A qué nombre guardamos tu pedido?" antes de generar [PEDIDO].
 
+CUPÓN DE DESCUENTO: si en cualquier momento de la conversación el cliente menciona que tiene un cupón, código de descuento o promoción (ej. "tengo el código VERANO20", "¿aplica algún descuento?"), captúralo con la etiqueta [CUPON] (ver abajo) usando el texto EXACTO que dio, tal como lo escribió. NUNCA le digas tú qué porcentaje tiene, si es válido, o si ya expiró -- tú no tienes esa información, la valida el sistema automáticamente y el propio pedido le confirmará el descuento aplicado (o le avisará si el código no sirvió). Solo responde algo breve como "¡Claro, lo aplico a tu pedido!" y continúa el flujo normal.
+
 REGLAS:
 - NUNCA sugieras sucursal sin tener la dirección primero
 - NUNCA inventes precios — usa exactamente los del menú
 - Cuando el cliente pregunte si una sucursal es restaurante/híbrido o fast food (o si aplica alguna promoción que dependa de eso), usa EXACTAMENTE la clasificación de la lista de SUCURSALES de arriba -- nunca lo adivines por el nombre de la sucursal
 - NUNCA mezcles categorías del menú
 - Sí acepta modificaciones razonables a un platillo (quitar ingrediente, cambiar proteína, sin salsa, etc.) -- ver MODIFICACIONES A PLATILLOS arriba. No es lo mismo que "mezclar categorías del menú"
+- Si el cliente menciona un cupón/código de descuento, captúralo con [CUPON] -- ver CUPÓN DE DESCUENTO arriba. NUNCA inventes ni asumas un porcentaje de descuento
 - Si el cliente menciona algo que no está en el menú, díselo amablemente
 - Entiende lenguaje informal, errores de tipeo y expresiones mexicanas
 - Si el cliente confirma con "sí", "va", "dale", "esa mera", "órale", "sale" o similares, tómalo como confirmación
@@ -136,10 +139,11 @@ REGLAS:
 - Las categorías del menú son: Sushi 2x1, Combos, Sushi Box, Entradas, Hand Rolls, Sopas, Brochetas Kushiagues, Ensaladas, Arroz, Rollos Tradicionales, Rollos Especialidades, Bowls, Cocina Caliente, Postres, Bebidas
 
 ETIQUETAS DEL SISTEMA (invisibles para el cliente, solo al final del mensaje):
-[PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"NOMBRE_EXACTO","precio":PRECIO_EXACTO,"cantidad":1,"modificaciones":"sin pepino"}],"tipo":"sucursal|domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"...","nombre_cliente":"..."}}[/PEDIDO]  <- "modificaciones" es OPCIONAL, solo inclúyelo en el item si el cliente pidió un cambio para ese platillo (ver MODIFICACIONES A PLATILLOS arriba). Omite el campo por completo si no pidió ninguno.
+[PEDIDO]{"accion":"REGISTRAR_PEDIDO","pedido":{"items":[{"nombre":"NOMBRE_EXACTO","precio":PRECIO_EXACTO,"cantidad":1,"modificaciones":"sin pepino"}],"tipo":"sucursal|domicilio","direccion":"...","colonia":"...","referencias":"...","sucursal":"...","nombre_cliente":"...","cupon":"CODIGO"}}[/PEDIDO]  <- "modificaciones" es OPCIONAL, solo inclúyelo en el item si el cliente pidió un cambio para ese platillo (ver MODIFICACIONES A PLATILLOS arriba). Omite el campo por completo si no pidió ninguno. "cupon" también es OPCIONAL, solo inclúyelo si el cliente dio un código de descuento (ver CUPÓN DE DESCUENTO arriba); omítelo si no mencionó ninguno.
 [RESERVACION]{"accion":"REGISTRAR_RESERVACION","reservacion":{"nombre":"...","fecha":"...","hora":"...","personas":0,"sucursal":"..."}}[/RESERVACION]
 [ESCALAR]{"accion":"ESCALAR_HUMANO","motivo":"..."}[/ESCALAR]
 [NOMBRE]{"nombre_cliente":"NOMBRE_EXACTO"}[/NOMBRE]  <- agrega esta etiqueta la PRIMERA VEZ que el cliente te diga su nombre en la conversacion (sin importar en que paso del flujo estes). No la repitas si ya la mandaste antes en este mismo chat. Puede ir junto con cualquier otra etiqueta o sola.
+[CUPON]{"cupon":"CODIGO_EXACTO"}[/CUPON]  <- agrega esta etiqueta la PRIMERA VEZ que el cliente mencione que tiene un cupón/código de descuento, sin importar en qué paso del flujo estés. No inventes ni asumas el porcentaje -- solo captura el código tal cual lo escribió. Puede ir junto con cualquier otra etiqueta o sola.
 
 DOMICILIO: Envío gratis | ~40 min | Sin restricciones de zona
 SUCURSALES:
@@ -225,11 +229,25 @@ async function procesarMensaje(historial, mensajeNuevo, sucursalesActivas) {
       } catch (e) { /* etiqueta mal formada -- ignorar, no es critico */ }
     }
 
+    // Etiqueta separada [CUPON] -- igual que [NOMBRE], se captura en cuanto el
+    // cliente la menciona, sin importar en que paso del flujo este (no
+    // depende de que ya se haya generado [PEDIDO]).
+    let cuponCodigo = null;
+    const cuponMatch = textoRespuesta.match(/\[CUPON\]([\s\S]*?)\[\/CUPON\]/i);
+    if (cuponMatch) {
+      try {
+        const datosCupon = JSON.parse(cuponMatch[1].trim());
+        cuponCodigo = datosCupon.cupon || null;
+        if (cuponCodigo) logger.info(`Código de cupón detectado: ${cuponCodigo}`);
+      } catch (e) { /* etiqueta mal formada -- ignorar, no es critico */ }
+    }
+
     let textoLimpio = textoRespuesta
       .replace(/\[PEDIDO\][\s\S]*?\[\/PEDIDO\]/gi, "")
       .replace(/\[RESERVACION\][\s\S]*?\[\/RESERVACION\]/gi, "")
       .replace(/\[ESCALAR\][\s\S]*?\[\/ESCALAR\]/gi, "")
       .replace(/\[NOMBRE\][\s\S]*?\[\/NOMBRE\]/gi, "")
+      .replace(/\[CUPON\][\s\S]*?\[\/CUPON\]/gi, "")
       .trim();
 
     // Si el agente habla de un platillo pero no menciona precio, inyectarlo
@@ -252,6 +270,7 @@ async function procesarMensaje(historial, mensajeNuevo, sucursalesActivas) {
       accion: accion?.tipo || null,
       datos: accion?.datos || null,
       nombreCliente,
+      cuponCodigo,
       historialActualizado: [
         ...historial,
         { role: "user", content: mensajeNuevo },

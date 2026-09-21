@@ -59,6 +59,14 @@ async function initDB() {
     // pedido apareciera "vencido" casi de inmediato aunque el restaurante
     // apenas lo estuviera viendo.
     await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS pago_confirmado_en TIMESTAMPTZ;`);
+    // NUEVO (21-sep-2026, pedido por Diego): cupones de descuento. Se guarda
+    // que codigo se uso (si alguno) y cuanto se descuento en pesos, para que
+    // el dashboard y el mensaje de confirmacion siempre puedan mostrar el
+    // total real cobrado sin tener que recalcularlo despues -- el total base
+    // (sin descuento) se sigue derivando de "items" como siempre.
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cupon_codigo TEXT;`);
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS descuento_porcentaje NUMERIC(5,2);`);
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS descuento_monto NUMERIC(10,2);`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS reservaciones (
         id TEXT PRIMARY KEY,
@@ -158,6 +166,23 @@ async function initDB() {
         actualizado TIMESTAMPTZ DEFAULT NOW()
       );
     `);
+    // NUEVO (21-sep-2026, pedido por Diego): campañas de cupones de
+    // descuento, administrables desde el panel ("Podemos hacer campañas...
+    // dependiendo del codigo sea el %"). El descuento aplica sobre el TOTAL
+    // del pedido (no por platillo), para domicilio y sucursal por igual.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS cupones (
+        codigo TEXT PRIMARY KEY,
+        porcentaje NUMERIC(5,2) NOT NULL,
+        fecha_inicio DATE,
+        fecha_fin DATE,
+        usos_maximos INTEGER,
+        usos_actuales INTEGER NOT NULL DEFAULT 0,
+        activo BOOLEAN NOT NULL DEFAULT TRUE,
+        creado TIMESTAMPTZ DEFAULT NOW(),
+        actualizado TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
     logger.info("Base de datos inicializada correctamente");
   } catch (err) {
     logger.error("Error inicializando DB: " + err.message);
@@ -171,8 +196,8 @@ async function initDB() {
 
 async function guardarPedido(pedido) {
   await pool.query(`
-    INSERT INTO pedidos (id, fecha, estado, telefono_cliente, nombre_cliente, sucursal, items, tipo, direccion, colonia, municipio, estado_direccion, codigo_postal, referencias, ubicacion_gps)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+    INSERT INTO pedidos (id, fecha, estado, telefono_cliente, nombre_cliente, sucursal, items, tipo, direccion, colonia, municipio, estado_direccion, codigo_postal, referencias, ubicacion_gps, cupon_codigo, descuento_porcentaje, descuento_monto)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
     ON CONFLICT (id) DO UPDATE SET
       estado = EXCLUDED.estado,
       nombre_cliente = COALESCE(EXCLUDED.nombre_cliente, pedidos.nombre_cliente),
@@ -185,7 +210,13 @@ async function guardarPedido(pedido) {
     pedido.sucursal, JSON.stringify(pedido.items), pedido.tipo,
     pedido.direccion, pedido.colonia, pedido.municipio || null, pedido.estado_direccion || null, pedido.codigo_postal || null,
     pedido.referencias,
-    pedido.ubicacion_gps ? JSON.stringify(pedido.ubicacion_gps) : null
+    pedido.ubicacion_gps ? JSON.stringify(pedido.ubicacion_gps) : null,
+    // Cupon aplicado a este pedido (si el cliente dio uno valido) -- ver
+    // src/utils/cupones.js. Null en los pedidos que no usan cupon (la
+    // inmensa mayoria), sin romper nada de lo que ya existia.
+    pedido.cupon_codigo || null,
+    pedido.descuento_porcentaje || null,
+    pedido.descuento_monto || null,
   ]);
 }
 
@@ -572,6 +603,65 @@ async function insertarUsuarioDashboardSiNoExiste(u) {
   `, [u.usuario.toLowerCase(), hash, u.sucursal || null, u.rol || "sucursal"]);
 }
 
+// ── CUPONES (campañas de descuento, editable desde el panel) ────────────────
+// El codigo se guarda siempre en MAYUSCULAS para que la comparacion no
+// dependa de como lo haya escrito el cliente por WhatsApp ("desc10" ==
+// "DESC10"). Ver src/utils/cupones.js para la logica de validacion
+// (vigencia, limite de usos) que usa estas funciones.
+
+async function obtenerCupones() {
+  const { rows } = await pool.query("SELECT * FROM cupones ORDER BY creado DESC");
+  return rows;
+}
+
+async function obtenerCuponPorCodigo(codigo) {
+  const { rows } = await pool.query("SELECT * FROM cupones WHERE codigo = $1", [(codigo || "").toUpperCase()]);
+  return rows[0] || null;
+}
+
+async function crearCupon({ codigo, porcentaje, fecha_inicio, fecha_fin, usos_maximos }) {
+  const { rows } = await pool.query(`
+    INSERT INTO cupones (codigo, porcentaje, fecha_inicio, fecha_fin, usos_maximos)
+    VALUES ($1,$2,$3,$4,$5) RETURNING *
+  `, [codigo.toUpperCase(), porcentaje, fecha_inicio || null, fecha_fin || null, usos_maximos || null]);
+  return rows[0];
+}
+
+async function actualizarCupon(codigo, campos) {
+  const permitidos = ["porcentaje", "fecha_inicio", "fecha_fin", "usos_maximos", "activo"];
+  const sets = [];
+  const values = [];
+  let i = 1;
+  for (const campo of permitidos) {
+    if (campos[campo] !== undefined) {
+      // Campos de fecha/numero opcionales: un string vacio desde el formulario
+      // debe guardarse como NULL ("sin fecha limite"/"sin tope de usos"), no
+      // como el string "" (que Postgres rechazaria para DATE/INTEGER).
+      sets.push(`${campo} = $${i}`);
+      values.push(campos[campo] === "" ? null : campos[campo]);
+      i++;
+    }
+  }
+  if (sets.length === 0) return null;
+  values.push(codigo.toUpperCase());
+  const { rows } = await pool.query(
+    `UPDATE cupones SET ${sets.join(", ")}, actualizado = NOW() WHERE codigo = $${i} RETURNING *`,
+    values
+  );
+  return rows[0] || null;
+}
+
+// Se llama solo cuando un pedido con este cupon se llega a CREAR (no exige
+// que el pago se complete despues). Es una decision deliberada para
+// mantener el sistema simple: el limite de usos protege contra que el
+// codigo se reparta/comparta de mas, no es un control financiero exacto.
+async function incrementarUsoCupon(codigo) {
+  await pool.query(
+    "UPDATE cupones SET usos_actuales = usos_actuales + 1, actualizado = NOW() WHERE codigo = $1",
+    [(codigo || "").toUpperCase()]
+  );
+}
+
 // ── ENSAMBLADOR: config completa (para uso futuro del agente de IA) ────────
 
 async function obtenerConfiguracionRestaurante(estaticos) {
@@ -640,4 +730,10 @@ module.exports = {
   eliminarUsuarioDashboard,
   insertarUsuarioDashboardSiNoExiste,
   obtenerConfiguracionRestaurante,
+  // Cupones de descuento
+  obtenerCupones,
+  obtenerCuponPorCodigo,
+  crearCupon,
+  actualizarCupon,
+  incrementarUsoCupon,
 };

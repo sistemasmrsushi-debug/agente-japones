@@ -205,6 +205,7 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
         <button class="filtro-btn active" id="subtab-menu" onclick="cambiarSubtabAdmin('menu')">Menú y precios</button>
         <button class="filtro-btn" id="subtab-sucursales" onclick="cambiarSubtabAdmin('sucursales')">Sucursales</button>
         <button class="filtro-btn" id="subtab-usuarios" onclick="cambiarSubtabAdmin('usuarios')">Usuarios</button>
+        <button class="filtro-btn" id="subtab-cupones" onclick="cambiarSubtabAdmin('cupones')">Cupones</button>
       </div>
 
       <div class="admin-sub active" id="admin-menu">
@@ -255,6 +256,24 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
           <table>
             <thead><tr><th>Usuario</th><th>Sucursal</th><th>Rol</th><th>Nueva contraseña</th><th>Acciones</th></tr></thead>
             <tbody id="tbody-admin-usuarios"><tr><td colspan="5" class="vacio">Cargando...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="admin-sub" id="admin-cupones">
+        <div class="admin-form">
+          <input class="admin-input admin-input-sm" id="ac-codigo" placeholder="Código (ej. VERANO20)" style="text-transform:uppercase">
+          <input class="admin-input admin-input-sm" id="ac-porcentaje" type="number" step="1" min="1" max="100" placeholder="% descuento">
+          <input class="admin-input" id="ac-fecha-inicio" type="date" title="Fecha de inicio (opcional)">
+          <input class="admin-input" id="ac-fecha-fin" type="date" title="Fecha de fin (opcional)">
+          <input class="admin-input admin-input-sm" id="ac-usos-maximos" type="number" step="1" min="1" placeholder="Límite de usos (opcional)">
+          <button class="btn-guardar" onclick="agregarCupon()">+ Agregar</button>
+        </div>
+        <div class="admin-msg" id="ac-msg"></div>
+        <div class="tabla-wrap">
+          <table>
+            <thead><tr><th>Código</th><th>%</th><th>Desde</th><th>Hasta</th><th>Límite de usos</th><th>Usados</th><th>Activo</th><th></th></tr></thead>
+            <tbody id="tbody-admin-cupones"><tr><td colspan="8" class="vacio">Cargando...</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -390,7 +409,12 @@ function filaP(p) {
   // modificacion al platillo (ej. "sin pepino", "cambiar salmon por atun"),
   // se resalta junto al item para que la cocina no se la pierda.
   const items = Array.isArray(p.items) ? p.items.map(i=>`${i.cantidad||1}× ${i.nombre}${i.modificaciones?` <b style="color:#c0392b">(${i.modificaciones})</b>`:''}`).join(', ') : (p.items||'—');
-  const total = Array.isArray(p.items) ? p.items.reduce((s,i)=>s+(i.precio||0)*(i.cantidad||1),0) : '—';
+  const totalBase = Array.isArray(p.items) ? p.items.reduce((s,i)=>s+(i.precio||0)*(i.cantidad||1),0) : '—';
+  // NUEVO (21-sep-2026, cupones de descuento): si el pedido tiene un cupon
+  // aplicado, mostrar el total YA descontado (lo que en realidad se cobra),
+  // con una nota chica de cuanto se descontó y con qué código.
+  const descuento = Number(p.descuento_monto) || 0;
+  const total = (totalBase !== '—' && descuento > 0) ? Math.round((totalBase - descuento) * 100) / 100 : totalBase;
   const fechaObj = new Date(p.fecha);
   const hora = fechaObj.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
   const fechaCorta = fechaObj.toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit'});
@@ -424,7 +448,7 @@ function filaP(p) {
     <td>${items}${direccionHtml}${gpsHtml}</td>
     <td>${p.sucursal||'—'}</td>
     <td style="font-size:0.7rem">${tipo}</td>
-    <td style="color:var(--turquesa)">${total!=='—'?'$'+total+' MXN':'—'}</td>
+    <td style="color:var(--turquesa)">${total!=='—'?'$'+total+' MXN':'—'}${descuento>0?`<div style="font-size:0.6rem;color:var(--verde)">🎟️ ${p.cupon_codigo} (-$${descuento})</div>`:''}</td>
     <td><span class="badge ${p.estado}">${p.estado.replace('_',' ')}</span></td>
     <td><div class="acciones">${acciones}</div></td>
   </tr>`;
@@ -600,6 +624,7 @@ function cambiarSubtabAdmin(sub) {
   if (sub==='menu') cargarAdminMenu();
   if (sub==='sucursales') cargarAdminSucursales();
   if (sub==='usuarios') cargarAdminUsuarios();
+  if (sub==='cupones') cargarAdminCupones();
 }
 
 function mostrarMsg(elId, texto, ok) {
@@ -846,6 +871,70 @@ async function agregarUsuario() {
     mostrarMsg('au-msg', `Usuario "${usuario}" creado.`, true);
     cargarAdminUsuarios();
   } catch { mostrarMsg('au-msg', 'Error de conexión.', false); }
+}
+
+// ---------- CUPONES ----------
+// NUEVO (21-sep-2026, pedido por Diego): campañas de descuento por código.
+// El código no es editable una vez creado (igual que el nombre de sucursal);
+// para "borrar" un cupón se desactiva con el checkbox "Activo".
+
+async function cargarAdminCupones() {
+  try {
+    const cupones = await (await fetchAuth('/api/admin/cupones')).json();
+    renderAdminCupones(cupones);
+  } catch { mostrarMsg('ac-msg', 'Error cargando cupones.', false); }
+}
+
+function renderAdminCupones(cupones) {
+  const tbody = document.getElementById('tbody-admin-cupones');
+  tbody.innerHTML = cupones.length ? cupones.map(c => `
+    <tr data-codigo="${c.codigo}" style="${c.activo === false ? 'opacity:0.45' : ''}">
+      <td style="font-weight:600">${c.codigo}</td>
+      <td class="celda-input"><input class="admin-input-edit" type="number" step="1" min="1" max="100" style="width:70px" value="${c.porcentaje}" data-campo="porcentaje"></td>
+      <td class="celda-input"><input class="admin-input-edit" type="date" value="${c.fecha_inicio ? c.fecha_inicio.substring(0,10) : ''}" data-campo="fecha_inicio"></td>
+      <td class="celda-input"><input class="admin-input-edit" type="date" value="${c.fecha_fin ? c.fecha_fin.substring(0,10) : ''}" data-campo="fecha_fin"></td>
+      <td class="celda-input"><input class="admin-input-edit" type="number" step="1" min="1" style="width:90px" placeholder="Sin límite" value="${c.usos_maximos ?? ''}" data-campo="usos_maximos"></td>
+      <td style="text-align:center">${c.usos_actuales}</td>
+      <td style="text-align:center"><input type="checkbox" data-campo="activo" ${c.activo !== false ? 'checked' : ''} title="Si se desmarca, el código deja de aceptarse"></td>
+      <td><button class="btn-accion azul" onclick="guardarCupon('${c.codigo}', this)">Guardar</button></td>
+    </tr>`).join('') : '<tr><td colspan="8" class="vacio">Sin cupones registrados.</td></tr>';
+}
+
+async function guardarCupon(codigo, btn) {
+  const fila = btn.closest('tr');
+  const campos = {};
+  fila.querySelectorAll('[data-campo]').forEach(inp => {
+    campos[inp.dataset.campo] = inp.type === 'checkbox' ? inp.checked : inp.value;
+  });
+  try {
+    const r = await fetchAuth(`/api/admin/cupones/${codigo}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(campos) });
+    const data = await r.json();
+    if (!r.ok) return mostrarMsg('ac-msg', data.error || 'Error al guardar.', false);
+    mostrarMsg('ac-msg', `Cupón "${data.codigo}" actualizado.`, true);
+    cargarAdminCupones();
+  } catch { mostrarMsg('ac-msg', 'Error de conexión.', false); }
+}
+
+async function agregarCupon() {
+  const codigo = document.getElementById('ac-codigo').value.trim().toUpperCase();
+  const porcentaje = document.getElementById('ac-porcentaje').value;
+  const fecha_inicio = document.getElementById('ac-fecha-inicio').value;
+  const fecha_fin = document.getElementById('ac-fecha-fin').value;
+  const usos_maximos = document.getElementById('ac-usos-maximos').value;
+  if (!codigo) return mostrarMsg('ac-msg', 'El código es obligatorio.', false);
+  if (!porcentaje || porcentaje < 1 || porcentaje > 100) return mostrarMsg('ac-msg', 'El porcentaje debe ser entre 1 y 100.', false);
+  try {
+    const r = await fetchAuth('/api/admin/cupones', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({codigo,porcentaje,fecha_inicio,fecha_fin,usos_maximos}) });
+    const data = await r.json();
+    if (!r.ok) return mostrarMsg('ac-msg', data.error || 'Error al crear cupón.', false);
+    document.getElementById('ac-codigo').value = '';
+    document.getElementById('ac-porcentaje').value = '';
+    document.getElementById('ac-fecha-inicio').value = '';
+    document.getElementById('ac-fecha-fin').value = '';
+    document.getElementById('ac-usos-maximos').value = '';
+    mostrarMsg('ac-msg', `Cupón "${codigo}" creado.`, true);
+    cargarAdminCupones();
+  } catch { mostrarMsg('ac-msg', 'Error de conexión.', false); }
 }
 </script>
 </body>
