@@ -126,7 +126,14 @@ async function geocodificarInverso(lat, lng) {
       // Sin API key no se puede obtener direccion/colonia/CP -- se acepta la
       // ubicacion tal cual, con las coordenadas como unico dato (igual que
       // validarDireccion cuando falla la llamada a Google).
-      return { valida: true, direccion: `Ubicación compartida (${lat}, ${lng})`, coords: { lat, lng }, maps_url: mapsUrl };
+      // NOTA (23-sep-2026, reportado por Diego con captura real): el formato
+      // ANTES usaba parentesis "Ubicación compartida (lat, lng)" -- Netpay
+      // exige que el campo de direccion de facturacion NO tenga parentesis
+      // (ver CAMPO_VALIDO_REGEX en netpay.js), asi que un pedido a domicilio
+      // por ubicacion GPS sin direccion resuelta fallaba SIEMPRE al generar
+      // el link de pago. Se quita el parentesis mantiendo solo caracteres
+      // permitidos (letras, numeros, espacios, comas, puntos, guiones).
+      return { valida: true, direccion: `Ubicación compartida ${lat}, ${lng}`, coords: { lat, lng }, maps_url: mapsUrl };
     }
 
     const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}&language=es&region=MX`;
@@ -145,7 +152,7 @@ async function geocodificarInverso(lat, lng) {
 
     if (data.status !== "OK" || !data.results?.length) {
       logger.warn(`Geocodificacion inversa sin resultados: (${lat}, ${lng}) -> ${data.status}`);
-      return { valida: true, direccion: `Ubicación compartida (${lat}, ${lng})`, coords: { lat, lng }, maps_url: mapsUrl };
+      return { valida: true, direccion: `Ubicación compartida ${lat}, ${lng}`, coords: { lat, lng }, maps_url: mapsUrl };
     }
 
     const resultado = data.results[0];
@@ -175,7 +182,7 @@ async function geocodificarInverso(lat, lng) {
 
   } catch (error) {
     logger.error("Error geocodificacion inversa: " + error.message);
-    return { valida: true, direccion: `Ubicación compartida (${lat}, ${lng})`, coords: { lat, lng }, maps_url: mapsUrl };
+    return { valida: true, direccion: `Ubicación compartida ${lat}, ${lng}`, coords: { lat, lng }, maps_url: mapsUrl };
   }
 }
 

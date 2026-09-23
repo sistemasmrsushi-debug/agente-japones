@@ -73,6 +73,20 @@ function validarLineItems(lineItems) {
   return null;
 }
 
+// NUEVO (23-sep-2026, reportado por Diego con captura real): un pedido a
+// domicilio por ubicacion GPS (sin direccion de texto resuelta) generaba un
+// campo de direccion con parentesis ("Ubicación compartida (lat, lng)"),
+// que CAMPO_VALIDO_REGEX rechazaba -- el pedido quedaba registrado pero
+// SIN link de pago, sin aviso claro al cliente de que hacer. Se corrigio el
+// formato en geocoding.js, pero ademas se agrega esta limpieza aqui como
+// segunda capa: en vez de rechazar TODO el pedido por un caracter suelto
+// no permitido (un apostrofe en un nombre, algun simbolo raro), se quita
+// ese caracter y se sigue -- mejor un texto levemente simplificado que un
+// cliente sin poder pagar.
+function sanitizarCampoFacturacion(valor) {
+  return String(valor || "").replace(/[^a-zA-Z0-9À-ÿñÑ\s.,#\-\/]/g, "").trim();
+}
+
 function validarBilling(billing) {
   const campos = {
     "Nombre": billing.firstName,
@@ -152,14 +166,14 @@ async function generarLinkPago({ items, referencia, telefono, nombreCliente, dir
       : (emailFacturacionOverride || "accept@netpay.com.mx"); // sandbox: permite forzar reject@/review@ para certificacion; sin override, sigue igual que antes
 
     const billing = {
-      firstName,
-      lastName,
+      firstName: sanitizarCampoFacturacion(firstName),
+      lastName: sanitizarCampoFacturacion(lastName),
       email: emailFacturacion,
       phone: telefonoLimpio,
       address: {
-        street1: direccion || "",
+        street1: sanitizarCampoFacturacion(direccion),
         street2: "",
-        city: municipio || "",
+        city: sanitizarCampoFacturacion(municipio),
         state: estadoAIso(estadoDireccion),
         postalCode: codigoPostal || "",
         country: "MX", // ISO 3166-1 Alfa-2 (antes decia "Mexico", el nombre completo)
