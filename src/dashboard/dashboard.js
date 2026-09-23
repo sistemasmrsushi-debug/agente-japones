@@ -13,6 +13,12 @@ const { crearSesion, cerrarSesion, requireAuth, requireGerente, obtenerSesionesA
 // (la cocina lo acepta), ver el endpoint PATCH /api/pedidos/:id/estado.
 const { despacharUberDirect } = require("../utils/despacho_uber");
 const { notificarDueno } = require("../utils/alertas");
+// NUEVO (23-sep-2026, pedido por Diego): boton "Reenviar link" -- reusa la
+// misma logica de Netpay/facturacion/cupon que ya usaba el cliente cuando
+// escribia "ya pague"/"reintentar" por WhatsApp (ver reenviarLinkPago en
+// whatsapp.js), para que Diego pueda mandarle un link nuevo al cliente
+// desde el dashboard cuando le llega la alerta de que fallo Netpay.
+const { reenviarLinkPago } = require("../webhook/whatsapp");
 
 // NOTA: Los usuarios y contraseñas ya NO viven aqui hardcodeados.
 // Ahora se administran en la tabla `dashboard_usuarios` de PostgreSQL,
@@ -121,6 +127,31 @@ router.patch("/api/pedidos/:id/estado", requireAuth, async (req, res) => {
     res.json(pedido);
   } catch (err) {
     logger.error("Error actualizando pedido: " + err.message);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// NUEVO (23-sep-2026, pedido por Diego): boton "Reenviar link" en el
+// dashboard para pedidos atorados en "pendiente_pago" (ej. cuando la tarjeta
+// del cliente fue rechazada o Netpay fallo al generar el link la primera
+// vez). Solo aplica a pedidos a domicilio que sigan esperando pago -- para
+// cualquier otro estado/tipo no tiene sentido generar un link nuevo.
+router.post("/api/pedidos/:id/reenviar-link", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const pedido = await db.obtenerPedidoPorId(id);
+    if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    if (pedido.tipo !== "domicilio" || pedido.estado !== "pendiente_pago") {
+      return res.status(400).json({ error: "Este pedido no está esperando pago -- no se puede reenviar el link" });
+    }
+    const resultado = await reenviarLinkPago(pedido);
+    if (resultado.exito) {
+      res.json({ ok: true, linkPago: resultado.linkPago });
+    } else {
+      res.status(502).json({ error: resultado.error || "No se pudo generar el link de pago" });
+    }
+  } catch (err) {
+    logger.error("Error reenviando link de pago: " + err.message);
     res.status(500).json({ error: "Error interno" });
   }
 });

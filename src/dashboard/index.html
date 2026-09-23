@@ -420,6 +420,13 @@ function filaP(p) {
   const fechaCorta = fechaObj.toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit'});
   const urgente = esUrgente(p);
   const esGerente = sesion?.rol==='gerente';
+  // NUEVO (23-sep-2026, pedido por Diego: "si el cliente tuvo problemas al
+  // generarle el link de pago, si exista la opcion de poderle reenviar el
+  // link con un boton"): pedidos a domicilio atorados en "pendiente_pago"
+  // (ej. tarjeta rechazada, o el link fallo la primera vez) antes no tenian
+  // NINGUN boton de accion -- Diego tenia que resolverlo manualmente fuera
+  // del dashboard. Solo aplica a domicilio: los pedidos de sucursal no usan
+  // link de pago (se pagan en persona).
   const acciones = p.estado==='pendiente' ? `
     <button class="btn-accion verde" onclick="aceptarPedido('${p.id}')">✓ Aceptar pedido</button>
   ` : p.estado==='en_proceso' ? `
@@ -428,6 +435,8 @@ function filaP(p) {
     <span style="color:var(--verde);font-size:0.65rem">✓ Completado</span>
   ` : p.estado==='cancelado' ? `
     <span style="color:var(--muted);font-size:0.65rem">Cancelado</span>
+  ` : p.estado==='pendiente_pago' && p.tipo==='domicilio' ? `
+    <button class="btn-accion azul" onclick="reenviarLink('${p.id}', this)">🔁 Reenviar link</button>
   ` : '';
   const tipo = p.tipo==='domicilio' ? '🚚 Domicilio' : '🏪 Sucursal';
   // Telefono como link de llamada
@@ -597,6 +606,31 @@ async function aceptarPedido(id) {
   cerrarAlerta();
   await fetchAuth(`/api/pedidos/${id}/estado`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({estado:'en_proceso'})});
   cargarDatos();
+}
+
+// NUEVO (23-sep-2026, pedido por Diego): boton "Reenviar link" para pedidos
+// atorados en pendiente_pago. No hay un lugar fijo en la tabla para mostrar
+// mensajes de exito/error (a diferencia del panel de admin, que tiene un
+// div dedicado por seccion), asi que el feedback se muestra directo en el
+// boton -- mas simple y suficiente para una accion de un solo click.
+async function reenviarLink(id, btn) {
+  const textoOriginal = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Enviando...';
+  try {
+    const r = await fetchAuth(`/api/pedidos/${id}/reenviar-link`, {method:'POST'});
+    const data = await r.json();
+    if (!r.ok) {
+      btn.textContent = '❌ ' + (data.error || 'Error');
+      setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 4000);
+      return;
+    }
+    btn.textContent = '✅ Link enviado';
+    setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 4000);
+  } catch (e) {
+    btn.textContent = '❌ Error de conexión';
+    setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 4000);
+  }
 }
 
 function mostrarAlerta(texto, urgente = false) {

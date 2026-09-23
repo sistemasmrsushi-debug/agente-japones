@@ -309,6 +309,17 @@ async function obtenerPedidoPorUberDeliveryId(deliveryId) {
   return rows[0] || null;
 }
 
+// NUEVO (23-sep-2026, pedido por Diego): trae un pedido puntual por su id
+// propio (no el telefono ni el id de Uber). Se usa para el boton "Reenviar
+// link" del dashboard, donde Diego elige un pedido especifico de la lista.
+async function obtenerPedidoPorId(id) {
+  const { rows } = await pool.query(
+    "SELECT * FROM pedidos WHERE id = $1 LIMIT 1",
+    [id]
+  );
+  return rows[0] || null;
+}
+
 async function actualizarGPSPedido(telefono, ubicacion) {
   await pool.query(`
     UPDATE pedidos SET ubicacion_gps=$1, actualizado=NOW()
@@ -706,6 +717,7 @@ module.exports = {
   guardarEntregaUber,
   actualizarEstadoUber,
   obtenerPedidoPorUberDeliveryId,
+  obtenerPedidoPorId,
   obtenerStatsPedidos,
   guardarReservacion,
   obtenerReservaciones,

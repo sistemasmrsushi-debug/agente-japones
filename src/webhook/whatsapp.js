@@ -211,6 +211,47 @@ function lineasTotal(totalBase, cupon, descuentoMonto) {
   return `Subtotal: $${totalBase}\nDescuento (${cupon.codigo} -${Number(cupon.porcentaje)}%): -$${descuentoMonto}\nTotal: $${totalFinal}`;
 }
 
+// NUEVO (23-sep-2026, pedido por Diego): genera y manda un link de pago
+// NUEVO para un pedido que ya existe y sigue en "pendiente_pago" -- comparte
+// la misma logica de respaldo de facturacion/cupon que ya usaba CASO 0 (el
+// cliente escribiendo "ya pague"/"reintentar"). Se saca a una funcion aparte
+// y se exporta para que el boton "Reenviar link" del dashboard (ver
+// dashboard.js) pueda usarla tambien, sin duplicar la logica de Netpay.
+async function reenviarLinkPago(pedido) {
+  const facturacionRespaldo = await datosFacturacionConRespaldo(pedido);
+  const resultadoPago = await generarLinkPago({
+    items: pedido.items,
+    referencia: pedido.id,
+    telefono: pedido.telefono_cliente,
+    nombreCliente: pedido.nombre_cliente,
+    direccion: pedido.direccion,
+    colonia: pedido.colonia,
+    municipio: facturacionRespaldo.municipio,
+    estadoDireccion: facturacionRespaldo.estadoDireccion,
+    codigoPostal: facturacionRespaldo.codigoPostal,
+    // Si el pedido original ya tenia un cupon aplicado, el nuevo link debe
+    // conservar el mismo descuento -- si no, el reintento cobraria precio
+    // completo aunque el cliente ya haya "gastado" su cupon.
+    descuentoMonto: pedido.descuento_monto ? Number(pedido.descuento_monto) : 0,
+    cuponCodigo: pedido.cupon_codigo,
+  });
+
+  if (resultadoPago.exito) {
+    await enviarMensaje(pedido.telefono_cliente,
+      `💳 Aquí tienes un nuevo link de pago para tu pedido ${pedido.id}:\n${resultadoPago.linkPago}`
+    );
+    logger.info(`Nuevo link de pago generado (reintento) para ${pedido.id}`);
+    return { exito: true, linkPago: resultadoPago.linkPago };
+  }
+
+  await enviarMensaje(pedido.telefono_cliente,
+    `Tuvimos un problema generando tu nuevo link de pago. Te contactaremos en breve para ayudarte a completar el pago.`
+  );
+  logger.error(`Fallo generacion de link de pago (reintento) para ${pedido.id}: ${resultadoPago.error}`);
+  notificarDueno(`🔴 Netpay falló al reintentar el link de pago.\n\nPedido: ${pedido.id}\nCliente: ${(pedido.telefono_cliente || "").replace("whatsapp:", "")}\nMotivo: ${resultadoPago.error}\n\nEl cliente ya intentó pagar antes y ahora está reintentando -- probablemente esté esperando respuesta.`);
+  return { exito: false, error: resultadoPago.error };
+}
+
 // Decide la sucursal final que atendera un domicilio, respetando un radio maximo
 // de entrega. Mantiene el sistema de palabras clave (zonaSugerida) como primer
 // intento -- solo busca alternativas si esa sucursal queda demasiado lejos.
@@ -562,39 +603,10 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         return;
       }
 
-      const facturacionRespaldoRetry = await datosFacturacionConRespaldo(pedidoPendiente);
-      const resultadoPago = await generarLinkPago({
-        items: pedidoPendiente.items,
-        referencia: pedidoPendiente.id,
-        telefono: telefono,
-        nombreCliente: pedidoPendiente.nombre_cliente,
-        direccion: pedidoPendiente.direccion,
-        colonia: pedidoPendiente.colonia,
-        municipio: facturacionRespaldoRetry.municipio,
-        estadoDireccion: facturacionRespaldoRetry.estadoDireccion,
-        codigoPostal: facturacionRespaldoRetry.codigoPostal,
-        // Si el pedido original ya tenia un cupon aplicado, el nuevo link
-        // debe conservar el mismo descuento -- si no, el reintento cobraria
-        // precio completo aunque el cliente ya haya "gastado" su cupon.
-        descuentoMonto: pedidoPendiente.descuento_monto ? Number(pedidoPendiente.descuento_monto) : 0,
-        cuponCodigo: pedidoPendiente.cupon_codigo,
-      });
-
-      if (resultadoPago.exito) {
-        // No se reinicia el temporizador de cancelacion automatica (sigue
-        // corriendo desde la creacion original del pedido) -- el cliente
-        // conserva el mismo limite total de 15 minutos que ya se le informo.
-        await enviarMensaje(telefono,
-          `💳 Aquí tienes un nuevo link de pago para tu pedido ${pedidoPendiente.id}:\n${resultadoPago.linkPago}`
-        );
-        logger.info(`Nuevo link de pago generado (reintento) para ${pedidoPendiente.id}`);
-      } else {
-        await enviarMensaje(telefono,
-          `Tuvimos un problema generando tu nuevo link de pago. Te contactaremos en breve para ayudarte a completar el pago.`
-        );
-        logger.error(`Fallo generacion de link de pago (reintento) para ${pedidoPendiente.id}: ${resultadoPago.error}`);
-        notificarDueno(`🔴 Netpay falló al reintentar el link de pago.\n\nPedido: ${pedidoPendiente.id}\nCliente: ${telefono.replace("whatsapp:", "")}\nMotivo: ${resultadoPago.error}\n\nEl cliente ya intentó pagar antes y ahora está reintentando -- probablemente esté esperando respuesta.`);
-      }
+      // No se reinicia el temporizador de cancelacion automatica (sigue
+      // corriendo desde la creacion original del pedido) -- el cliente
+      // conserva el mismo limite total de 15 minutos que ya se le informo.
+      await reenviarLinkPago(pedidoPendiente);
       return;
     }
 
@@ -1214,3 +1226,8 @@ async function enviarMensaje(telefono, texto) {
 }
 
 module.exports = router;
+// Se cuelga como propiedad del mismo router (que en Express es una funcion)
+// para no romper `app.use(require("./whatsapp"))` en el servidor -- asi
+// dashboard.js puede hacer `const { reenviarLinkPago } = require("../webhook/whatsapp")`
+// y reusar la misma logica de Netpay/facturacion para el boton "Reenviar link".
+module.exports.reenviarLinkPago = reenviarLinkPago;
