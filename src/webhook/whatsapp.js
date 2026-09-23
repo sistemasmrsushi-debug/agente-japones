@@ -175,6 +175,32 @@ async function resolverCuponPedido(telefono, codigoCupon, totalBase) {
   return { cupon: resultado.cupon, descuentoMonto };
 }
 
+// NUEVO (23-sep-2026, reportado por Diego): cuando un pedido a domicilio
+// llega por ubicacion GPS y Google no logra resolver colonia/municipio/
+// estado/CP (ver geocodificarInverso en geocoding.js), esos campos quedan
+// vacios -- y Netpay EXIGE ciudad, estado y codigo postal no vacios para
+// generar el link de pago (ver validarBilling en netpay.js), asi que sin
+// esto el pedido se quedaria sin poder pagarse igual que antes, solo que
+// con un error distinto ("Ciudad no puede estar vacia" en vez del error de
+// parentesis que ya se corrigio). Como respaldo, se usa la direccion de la
+// PROPIA SUCURSAL asignada (ya geocodificada en el panel de administracion)
+// -- es geograficamente razonable porque el cliente esta cerca de ahi, y
+// evita bloquear el pago. Esto NO cambia lo que se guarda como direccion
+// real del pedido (pedido.municipio/etc. pueden seguir en null) -- solo
+// completa los datos que Netpay necesita para el checkout.
+async function datosFacturacionConRespaldo(pedido) {
+  if (pedido.municipio && pedido.estado_direccion && pedido.codigo_postal) {
+    return { municipio: pedido.municipio, estadoDireccion: pedido.estado_direccion, codigoPostal: pedido.codigo_postal };
+  }
+  const sucursales = await db.obtenerSucursales();
+  const sucursal = sucursales.find(s => s.nombre === pedido.sucursal);
+  return {
+    municipio: pedido.municipio || sucursal?.municipio || null,
+    estadoDireccion: pedido.estado_direccion || sucursal?.estado_direccion || null,
+    codigoPostal: pedido.codigo_postal || sucursal?.codigo_postal || null,
+  };
+}
+
 // Arma las lineas de "Total" de los mensajes de confirmacion, mostrando el
 // desglose (Subtotal/Descuento/Total) solo cuando de verdad se aplico un
 // cupon -- si no hay descuento, se ve exactamente igual que antes.
@@ -363,6 +389,7 @@ async function crearPedidoDomicilioYPedirPago(telefono, opts) {
     return;
   }
 
+  const facturacionRespaldo = await datosFacturacionConRespaldo(pedido);
   const resultadoPago = await generarLinkPago({
     items,
     referencia: pedido.id,
@@ -370,9 +397,9 @@ async function crearPedidoDomicilioYPedirPago(telefono, opts) {
     nombreCliente: pedido.nombre_cliente,
     direccion: pedido.direccion,
     colonia: pedido.colonia,
-    municipio: pedido.municipio,
-    estadoDireccion: pedido.estado_direccion,
-    codigoPostal: pedido.codigo_postal,
+    municipio: facturacionRespaldo.municipio,
+    estadoDireccion: facturacionRespaldo.estadoDireccion,
+    codigoPostal: facturacionRespaldo.codigoPostal,
     descuentoMonto,
     cuponCodigo: cupon?.codigo,
   });
@@ -533,6 +560,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         return;
       }
 
+      const facturacionRespaldoRetry = await datosFacturacionConRespaldo(pedidoPendiente);
       const resultadoPago = await generarLinkPago({
         items: pedidoPendiente.items,
         referencia: pedidoPendiente.id,
@@ -540,9 +568,9 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
         nombreCliente: pedidoPendiente.nombre_cliente,
         direccion: pedidoPendiente.direccion,
         colonia: pedidoPendiente.colonia,
-        municipio: pedidoPendiente.municipio,
-        estadoDireccion: pedidoPendiente.estado_direccion,
-        codigoPostal: pedidoPendiente.codigo_postal,
+        municipio: facturacionRespaldoRetry.municipio,
+        estadoDireccion: facturacionRespaldoRetry.estadoDireccion,
+        codigoPostal: facturacionRespaldoRetry.codigoPostal,
         // Si el pedido original ya tenia un cupon aplicado, el nuevo link
         // debe conservar el mismo descuento -- si no, el reintento cobraria
         // precio completo aunque el cliente ya haya "gastado" su cupon.
@@ -1042,6 +1070,7 @@ async function ejecutarAccion(accion, datos, telefono) {
           return;
         }
 
+        const facturacionRespaldoIA = await datosFacturacionConRespaldo(pedido);
         const resultadoPago = await generarLinkPago({
           items,
           referencia: pedido.id,
@@ -1049,9 +1078,9 @@ async function ejecutarAccion(accion, datos, telefono) {
           nombreCliente: pedido.nombre_cliente,
           direccion: pedido.direccion,
           colonia: pedido.colonia,
-          municipio: pedido.municipio,
-          estadoDireccion: pedido.estado_direccion,
-          codigoPostal: pedido.codigo_postal,
+          municipio: facturacionRespaldoIA.municipio,
+          estadoDireccion: facturacionRespaldoIA.estadoDireccion,
+          codigoPostal: facturacionRespaldoIA.codigoPostal,
           descuentoMonto,
           cuponCodigo: cupon?.codigo,
         });
