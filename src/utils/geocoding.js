@@ -2,6 +2,7 @@
 // Valida y normaliza direcciones usando Google Maps Geocoding API
 
 const logger = require("./logger");
+const { notificarDueno } = require("./alertas");
 
 // En muchos fraccionamientos mexicanos, un mismo nombre base se repite en
 // varias "etapas" o "secciones" numeradas (ej. "Alteña I", "Alteña II",
@@ -107,6 +108,11 @@ async function validarDireccion(direccionTexto) {
 
   } catch (error) {
     logger.error("Error geocoding: " + error.message);
+    // Alerta de heads-up (no urgente como Netpay/Uber): el pedido SI sigue
+    // adelante con la direccion tal cual la escribio el cliente, solo que
+    // sin validar contra Google ni calcular coordenadas -- Diego deberia
+    // saber que Google Maps esta fallando, aunque no bloquee la venta.
+    notificarDueno(`🟡 Google Maps no respondió al validar una dirección.\n\nMotivo: ${error.message}\n\nEl pedido sigue su curso con la dirección tal cual la escribió el cliente, sin validar. Si esto se repite seguido, puede ser un problema con la API Key de Google Maps.`);
     // Si falla Google, aceptar la direccion como viene
     return { valida: true, direccion: direccionTexto, coords: null };
   }
@@ -182,6 +188,7 @@ async function geocodificarInverso(lat, lng) {
 
   } catch (error) {
     logger.error("Error geocodificacion inversa: " + error.message);
+    notificarDueno(`🟡 Google Maps no respondió al resolver una ubicación GPS.\n\nMotivo: ${error.message}\n\nEl pedido sigue su curso usando la sucursal más cercana y la dirección de esa sucursal como respaldo para el pago. Si esto se repite seguido, puede ser un problema con la API Key de Google Maps.`);
     return { valida: true, direccion: `Ubicación compartida ${lat}, ${lng}`, coords: { lat, lng }, maps_url: mapsUrl };
   }
 }

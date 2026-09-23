@@ -12,6 +12,7 @@ const { crearSesion, cerrarSesion, requireAuth, requireGerente, obtenerSesionesA
 // aceptara el pedido. Ahora se dispara cuando el pedido pasa a "en_proceso"
 // (la cocina lo acepta), ver el endpoint PATCH /api/pedidos/:id/estado.
 const { despacharUberDirect } = require("../utils/despacho_uber");
+const { notificarDueno } = require("../utils/alertas");
 
 // NOTA: Los usuarios y contraseñas ya NO viven aqui hardcodeados.
 // Ahora se administran en la tabla `dashboard_usuarios` de PostgreSQL,
@@ -111,6 +112,7 @@ router.patch("/api/pedidos/:id/estado", requireAuth, async (req, res) => {
         mensaje = (mensaje || "") + `\n\n🛵 Ya estamos buscando tu repartidor. Puedes seguirlo aquí:\n${resultadoUber.trackingUrl}`;
       } else if (!resultadoUber.exito) {
         logger.warn(`Pedido ${id} aceptado pero el despacho a Uber Direct fallo -- revisar manualmente.`);
+        notificarDueno(`🔴 Uber Direct falló al despachar un repartidor.\n\nPedido: ${id}\nCliente: ${(pedido.telefono_cliente || "").replace("whatsapp:", "")}\nSucursal: ${pedido.sucursal}\nDirección: ${pedido.direccion || "—"}\n\nLa cocina ya aceptó el pedido pero NO se asignó repartidor -- hay que gestionarlo manualmente (llamar a un repartidor o volver a intentar el despacho).`);
       }
     }
 

@@ -9,6 +9,7 @@ const { validarDireccion, calcularDistanciaKm, geocodificarInverso } = require("
 const { generarLinkPago } = require("../utils/netpay");
 const { estaAbierto, textoHorario } = require("../utils/horario");
 const { validarCupon, calcularDescuento } = require("../utils/cupones");
+const { notificarDueno } = require("../utils/alertas");
 
 function getTwilioClient() {
   return require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -434,6 +435,7 @@ async function crearPedidoDomicilioYPedirPago(telefono, opts) {
       `Tu pedido fue registrado (ID: ${pedido.id}) pero tuvimos un problema generando el link de pago. Te contactaremos en breve para confirmar el pago.`
     );
     logger.error(`Fallo generacion de link de pago para ${pedido.id}: ${resultadoPago.error}`);
+    notificarDueno(`🔴 Netpay falló al generar el link de pago.\n\nPedido: ${pedido.id}\nCliente: ${telefono.replace("whatsapp:", "")}\nMotivo: ${resultadoPago.error}\n\nEl cliente ya recibió aviso, pero necesita que le confirmes el pago manualmente.`);
   }
 }
 
@@ -591,6 +593,7 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
           `Tuvimos un problema generando tu nuevo link de pago. Te contactaremos en breve para ayudarte a completar el pago.`
         );
         logger.error(`Fallo generacion de link de pago (reintento) para ${pedidoPendiente.id}: ${resultadoPago.error}`);
+        notificarDueno(`🔴 Netpay falló al reintentar el link de pago.\n\nPedido: ${pedidoPendiente.id}\nCliente: ${telefono.replace("whatsapp:", "")}\nMotivo: ${resultadoPago.error}\n\nEl cliente ya intentó pagar antes y ahora está reintentando -- probablemente esté esperando respuesta.`);
       }
       return;
     }
@@ -1094,6 +1097,7 @@ async function ejecutarAccion(accion, datos, telefono) {
             `Tu pedido fue registrado (ID: ${pedido.id}) pero tuvimos un problema generando el link de pago. Te contactaremos en breve para confirmar el pago.`
           );
           logger.error(`Fallo generacion de link de pago (via IA) para ${pedido.id}: ${resultadoPago.error}`);
+          notificarDueno(`🔴 Netpay falló al generar el link de pago.\n\nPedido: ${pedido.id}\nCliente: ${telefono.replace("whatsapp:", "")}\nMotivo: ${resultadoPago.error}\n\nEl cliente ya recibió aviso, pero necesita que le confirmes el pago manualmente.`);
         }
         return;
       }
