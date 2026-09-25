@@ -19,6 +19,9 @@ const { notificarDueno } = require("../utils/alertas");
 // whatsapp.js), para que Diego pueda mandarle un link nuevo al cliente
 // desde el dashboard cuando le llega la alerta de que fallo Netpay.
 const { reenviarLinkPago } = require("../webhook/whatsapp");
+// NUEVO (25-sep-2026, pedido por Diego): reporte financiero/operativo
+// descargable en Excel (ventas, cupones/descuentos, quejas, reservaciones).
+const { generarReporteExcel } = require("../utils/reportes");
 
 // NOTA: Los usuarios y contraseñas ya NO viven aqui hardcodeados.
 // Ahora se administran en la tabla `dashboard_usuarios` de PostgreSQL,
@@ -83,6 +86,37 @@ router.get("/api/pedidos", requireAuth, async (req, res) => {
     res.json(pedidos);
   } catch (err) {
     logger.error("Error obteniendo pedidos: " + err.message);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// NUEVO (23-sep-2026, pedido por Diego): seguimiento de quejas de clientes.
+// El agente de IA ya las captura solas en la conversacion de WhatsApp (ver
+// QUEJA O PROBLEMA DEL CLIENTE en agente.js) -- aqui solo se listan para que
+// el dashboard las muestre, filtradas por sucursal igual que los pedidos.
+router.get("/api/quejas", requireAuth, async (req, res) => {
+  try {
+    const { rol, sucursal } = req.sesion;
+    const quejas = await db.obtenerQuejas(sucursal, rol);
+    res.json(quejas);
+  } catch (err) {
+    logger.error("Error obteniendo quejas: " + err.message);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// Boton "Marcar como resuelta" -- para las quejas que el agente NO pudo
+// resolver solo (las que ya llegaron con estado "nueva" y dispararon la
+// alerta a Diego). No hay endpoint para "reabrir" por ahora -- si hace
+// falta, se agrega despues.
+router.patch("/api/quejas/:id/resuelta", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const queja = await db.marcarQuejaResuelta(id);
+    if (!queja) return res.status(404).json({ error: "Queja no encontrada" });
+    res.json(queja);
+  } catch (err) {
+    logger.error("Error actualizando queja: " + err.message);
     res.status(500).json({ error: "Error interno" });
   }
 });
@@ -186,6 +220,47 @@ router.get("/api/sesiones-activas", requireGerente, (req, res) => {
   } catch (err) {
     logger.error("Error obteniendo sesiones activas: " + err.message);
     res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// NUEVO (25-sep-2026, pedido por Diego): reporte financiero/operativo en
+// Excel para un rango de fechas -- solo gerente. Junta ventas, cupones/
+// descuentos, quejas y reservaciones en un solo archivo .xlsx con una hoja
+// por tema (ver src/utils/reportes.js). El token llega por query param (no
+// por header) porque el navegador dispara esto como una descarga normal,
+// no como un fetch -- ver requireGerente/extraerToken en auth.js, que ya
+// acepta el token de las dos formas.
+router.get("/api/reportes/excel", requireGerente, async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+    if (!desde || !hasta) return res.status(400).json({ error: "Faltan las fechas 'desde' y 'hasta'" });
+
+    // "hasta" es inclusivo para quien lo pide (ej. "hasta el 30 de
+    // septiembre"), pero la consulta necesita un limite EXCLUSIVO -- se le
+    // suma un dia para cubrir el dia completo sin importar la hora exacta
+    // de cada registro.
+    const desdeFecha = new Date(desde + "T00:00:00");
+    const hastaFecha = new Date(hasta + "T00:00:00");
+    if (isNaN(desdeFecha.getTime()) || isNaN(hastaFecha.getTime())) {
+      return res.status(400).json({ error: "Fechas inválidas" });
+    }
+    hastaFecha.setDate(hastaFecha.getDate() + 1);
+
+    const [pedidos, quejas, reservaciones, cupones] = await Promise.all([
+      db.obtenerPedidosPorRango(desdeFecha, hastaFecha),
+      db.obtenerQuejasPorRango(desdeFecha, hastaFecha),
+      db.obtenerReservacionesPorRango(desdeFecha, hastaFecha),
+      db.obtenerCupones(),
+    ]);
+
+    const buffer = await generarReporteExcel({ desde, hasta, pedidos, cupones, quejas, reservaciones });
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="reporte_mrsushi_${desde}_a_${hasta}.xlsx"`);
+    res.send(Buffer.from(buffer));
+  } catch (err) {
+    logger.error("Error generando reporte: " + err.message);
+    res.status(500).json({ error: "Error interno generando el reporte" });
   }
 });
 

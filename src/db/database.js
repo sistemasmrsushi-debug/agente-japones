@@ -183,6 +183,29 @@ async function initDB() {
         actualizado TIMESTAMPTZ DEFAULT NOW()
       );
     `);
+    // NUEVO (23-sep-2026, pedido por Diego): seguimiento de quejas de
+    // clientes. El agente de IA las detecta solo en la conversacion normal
+    // de WhatsApp (ver QUEJA O PROBLEMA DEL CLIENTE en agente.js), intenta
+    // resolverlas con la informacion que tiene (SIN ofrecer compensacion por
+    // su cuenta), y las registra aqui para que quede rastro -- resueltas por
+    // el agente o no. "pedido_id" es solo una referencia best-effort al
+    // pedido mas reciente de ese telefono al momento de la queja (puede
+    // quedar NULL si el cliente nunca ha pedido).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS quejas (
+        id TEXT PRIMARY KEY,
+        fecha TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        telefono_cliente TEXT,
+        nombre_cliente TEXT,
+        sucursal TEXT,
+        pedido_id TEXT,
+        categoria TEXT NOT NULL DEFAULT 'otro',
+        descripcion TEXT,
+        estado TEXT NOT NULL DEFAULT 'nueva',
+        resuelta_por TEXT,
+        actualizado TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
     logger.info("Base de datos inicializada correctamente");
   } catch (err) {
     logger.error("Error inicializando DB: " + err.message);
@@ -673,6 +696,83 @@ async function incrementarUsoCupon(codigo) {
   );
 }
 
+// ── QUEJAS (seguimiento de quejas de clientes) ──────────────────────────────
+
+async function guardarQueja(queja) {
+  await pool.query(`
+    INSERT INTO quejas (id, fecha, telefono_cliente, nombre_cliente, sucursal, pedido_id, categoria, descripcion, estado, resuelta_por)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+  `, [
+    queja.id, queja.fecha, queja.telefono_cliente, queja.nombre_cliente || null,
+    queja.sucursal || null, queja.pedido_id || null, queja.categoria || "otro",
+    queja.descripcion || null, queja.estado || "nueva", queja.resuelta_por || null,
+  ]);
+}
+
+async function obtenerQuejas(sucursal, rol) {
+  let query = "SELECT * FROM quejas ORDER BY fecha DESC LIMIT 200";
+  let params = [];
+  if (rol !== "gerente" && sucursal) {
+    query = "SELECT * FROM quejas WHERE sucursal ILIKE $1 ORDER BY fecha DESC LIMIT 200";
+    params = [`%${sucursal}%`];
+  }
+  const { rows } = await pool.query(query, params);
+  return rows;
+}
+
+// Usado por el boton "Marcar como resuelta" del dashboard -- resuelta_por
+// siempre queda "staff" aqui, para distinguirla de las que el propio agente
+// de IA ya resolvio solo (ver whatsapp.js).
+async function marcarQuejaResuelta(id) {
+  const { rows } = await pool.query(
+    "UPDATE quejas SET estado='resuelta', resuelta_por='staff', actualizado=NOW() WHERE id=$1 RETURNING *",
+    [id]
+  );
+  return rows[0] || null;
+}
+
+// Referencia best-effort para vincular una queja con el pedido mas reciente
+// de ese telefono (de cualquier estado, a diferencia de
+// obtenerPedidoPendientePagoPorTelefono que solo busca los que siguen
+// esperando pago). No bloquea el registro de la queja si no encuentra nada.
+async function obtenerPedidoMasRecientePorTelefono(telefono) {
+  const { rows } = await pool.query(
+    "SELECT * FROM pedidos WHERE telefono_cliente = $1 ORDER BY fecha DESC LIMIT 1",
+    [telefono]
+  );
+  return rows[0] || null;
+}
+
+// ── REPORTES (rango de fechas, sin el LIMIT 200 que usa el dashboard normal
+// -- solo las usa el reporte de Excel del gerente, ver dashboard.js) ───────
+
+async function obtenerPedidosPorRango(desde, hasta) {
+  const { rows } = await pool.query(
+    "SELECT * FROM pedidos WHERE fecha >= $1 AND fecha < $2 ORDER BY fecha ASC",
+    [desde, hasta]
+  );
+  return rows;
+}
+
+async function obtenerQuejasPorRango(desde, hasta) {
+  const { rows } = await pool.query(
+    "SELECT * FROM quejas WHERE fecha >= $1 AND fecha < $2 ORDER BY fecha ASC",
+    [desde, hasta]
+  );
+  return rows;
+}
+
+// Se filtra por fecha_registro (cuando se hizo la reservacion), no por la
+// fecha de la reservacion en si (esa se guarda como texto libre, ej. "15 de
+// octubre", no como fecha real -- no se puede filtrar de forma confiable).
+async function obtenerReservacionesPorRango(desde, hasta) {
+  const { rows } = await pool.query(
+    "SELECT * FROM reservaciones WHERE fecha_registro >= $1 AND fecha_registro < $2 ORDER BY fecha_registro ASC",
+    [desde, hasta]
+  );
+  return rows;
+}
+
 // ── ENSAMBLADOR: config completa (para uso futuro del agente de IA) ────────
 
 async function obtenerConfiguracionRestaurante(estaticos) {
@@ -748,4 +848,13 @@ module.exports = {
   crearCupon,
   actualizarCupon,
   incrementarUsoCupon,
+  // Quejas de clientes
+  guardarQueja,
+  obtenerQuejas,
+  marcarQuejaResuelta,
+  obtenerPedidoMasRecientePorTelefono,
+  // Reportes
+  obtenerPedidosPorRango,
+  obtenerQuejasPorRango,
+  obtenerReservacionesPorRango,
 };

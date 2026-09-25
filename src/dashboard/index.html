@@ -153,6 +153,7 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
   <div class="tabs">
     <button class="tab active" id="tab-pedidos" onclick="cambiarTab('pedidos')">Pedidos</button>
     <button class="tab" id="tab-reservaciones" onclick="cambiarTab('reservaciones')">Reservaciones</button>
+    <button class="tab" id="tab-quejas" onclick="cambiarTab('quejas')">Quejas</button>
     <button class="tab" id="tab-gerente" onclick="cambiarTab('gerente')" style="display:none">Vista Gerente</button>
     <button class="tab" id="tab-admin" onclick="cambiarTab('admin')" style="display:none">Administración</button>
     <button class="refresh-btn" onclick="cargarDatos()">↻ Actualizar</button>
@@ -187,7 +188,30 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
         </table>
       </div>
     </div>
+    <div class="panel" id="panel-quejas">
+      <div class="filtros">
+        <button class="filtro-btn active" onclick="filtrarQuejas('todas',this)">Todas</button>
+        <button class="filtro-btn" onclick="filtrarQuejas('nueva',this)">Nuevas (necesitan seguimiento)</button>
+        <button class="filtro-btn" onclick="filtrarQuejas('resuelta',this)">Resueltas</button>
+      </div>
+      <div class="tabla-wrap">
+        <table>
+          <thead><tr><th>ID / Hora</th><th>Cliente</th><th>Categoría</th><th>Descripción</th><th>Pedido</th><th>Sucursal</th><th>Estado</th><th>Acciones</th></tr></thead>
+          <tbody id="tbody-quejas"><tr><td colspan="8" class="vacio">Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
     <div class="panel" id="panel-gerente">
+      <div class="conectividad-wrap">
+        <div class="conectividad-titulo">Descargar reporte (Excel)</div>
+        <div class="admin-form">
+          <input class="admin-input admin-input-sm" id="rep-desde" type="date">
+          <span style="color:var(--muted);font-size:0.7rem">a</span>
+          <input class="admin-input admin-input-sm" id="rep-hasta" type="date">
+          <button class="btn-guardar" onclick="descargarReporte()">⬇ Descargar Excel</button>
+        </div>
+        <div class="admin-msg" id="rep-msg"></div>
+      </div>
       <div class="conectividad-wrap">
         <div class="conectividad-titulo">Sucursales conectadas ahora</div>
         <div class="conectividad-grid" id="conectividad-grid"></div>
@@ -283,6 +307,7 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
 
 <script>
 let sesion = null, todosLosPedidos = [], filtroActual = 'todos';
+let todasLasQuejas = [], filtroQuejasActual = 'todas';
 setInterval(() => { document.getElementById('reloj').textContent = new Date().toLocaleString('es-MX',{weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'}); }, 1000);
 document.getElementById('inp-password').addEventListener('keydown', e => { if(e.key==='Enter') login(); });
 
@@ -322,7 +347,7 @@ function logout() { sesion=null; localStorage.removeItem('mrsushi_token'); docum
 
 async function cargarDatos() {
   if (!sesion) return;
-  await Promise.all([cargarPedidos(), cargarReservaciones()]);
+  await Promise.all([cargarPedidos(), cargarReservaciones(), cargarQuejas()]);
   if (sesion.rol==='gerente') cargarStats();
 }
 
@@ -351,6 +376,18 @@ async function cargarReservaciones() {
     const params = new URLSearchParams({sucursal: sesion.sucursal||'', rol: sesion.rol});
     const reservaciones = await (await fetchAuth('/api/reservaciones?'+params)).json();
     renderReservaciones(reservaciones);
+  } catch {}
+}
+
+async function cargarQuejas() {
+  try {
+    const params = new URLSearchParams({sucursal: sesion.sucursal||'', rol: sesion.rol});
+    const quejas = await (await fetchAuth('/api/quejas?'+params)).json();
+    todasLasQuejas = quejas;
+    renderQuejas(quejas);
+    const tab = document.getElementById('tab-quejas');
+    const nuevas = quejas.filter(q=>q.estado==='nueva').length;
+    tab.textContent = nuevas > 0 ? `Quejas (${nuevas})` : 'Quejas';
   } catch {}
 }
 
@@ -495,6 +532,14 @@ function renderFilasAgrupadas(items, obtenerFecha, renderFila, colspan, etiqueta
 
 const ETIQUETAS_PEDIDOS = { hoy: 'Pedidos de hoy', ayer: 'Pedidos de ayer', anteriores: 'Pedidos anteriores' };
 const ETIQUETAS_RESERVACIONES = { hoy: 'Reservaciones de hoy', ayer: 'Reservaciones de ayer', anteriores: 'Reservaciones anteriores' };
+const ETIQUETAS_QUEJAS = { hoy: 'Quejas de hoy', ayer: 'Quejas de ayer', anteriores: 'Quejas anteriores' };
+const CATEGORIAS_QUEJA = {
+  calidad_comida: 'Calidad de comida',
+  entrega_tardia: 'Entrega tardía',
+  mal_servicio: 'Mal servicio',
+  cobro_incorrecto: 'Cobro incorrecto',
+  otro: 'Otro',
+};
 
 function renderPedidos(pedidos) {
   const filtrados = filtroActual==='todos' ? pedidos : pedidos.filter(p=>p.estado===filtroActual);
@@ -523,6 +568,59 @@ function filaR(r) {
 function renderReservaciones(reservaciones) {
   document.getElementById('tbody-reservaciones').innerHTML =
     renderFilasAgrupadas(reservaciones, r=>r.fecha_registro, filaR, 8, ETIQUETAS_RESERVACIONES, 'Sin reservaciones.');
+}
+
+// NUEVO (23-sep-2026, pedido por Diego): tabla de quejas. El agente de IA ya
+// intento resolverlas solo (sin ofrecer compensacion) -- las que quedaron en
+// "nueva" son las que no pudo resolver y ya le mandaron una alerta por
+// WhatsApp a Diego; se resaltan igual que un pedido urgente para que salten
+// a la vista también aquí en el dashboard.
+function filaQ(q) {
+  const fechaObj = new Date(q.fecha);
+  const hora = fechaObj.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+  const fechaCorta = fechaObj.toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit'});
+  const telLimpio = (q.telefono_cliente||'').replace('whatsapp:','');
+  const telLink = telLimpio ? `<a href="tel:${telLimpio}" style="color:var(--turquesa);text-decoration:none">${telLimpio}</a>` : '—';
+  const resueltaPorTexto = q.resuelta_por==='agente' ? ' (por el agente)' : q.resuelta_por==='staff' ? ' (manual)' : '';
+  const acciones = q.estado==='nueva'
+    ? `<button class="btn-accion azul" onclick="marcarQuejaResuelta('${q.id}', this)">✓ Marcar resuelta</button>`
+    : `<span style="color:var(--verde);font-size:0.65rem">✓ Resuelta${resueltaPorTexto}</span>`;
+  return `<tr class="${q.estado==='nueva'?'fila-urgente':''}">
+    <td><div style="font-size:0.6rem;color:var(--muted)">${q.id}</div><div style="font-size:0.65rem;color:var(--muted)">${fechaCorta} · ${hora}</div></td>
+    <td>${q.nombre_cliente ? `<div style="font-weight:600">${q.nombre_cliente}</div>` : ''}${telLink}</td>
+    <td style="font-size:0.7rem">${CATEGORIAS_QUEJA[q.categoria] || q.categoria || '—'}</td>
+    <td style="font-size:0.7rem;max-width:280px">${q.descripcion||'—'}</td>
+    <td style="font-size:0.6rem;color:var(--muted)">${q.pedido_id||'—'}</td>
+    <td>${q.sucursal||'—'}</td>
+    <td><span class="badge ${q.estado==='nueva'?'pendiente':'listo'}">${q.estado==='nueva'?'Nueva':'Resuelta'}</span></td>
+    <td><div class="acciones">${acciones}</div></td>
+  </tr>`;
+}
+
+function renderQuejas(quejas) {
+  const filtradas = filtroQuejasActual==='todas' ? quejas : quejas.filter(q=>q.estado===filtroQuejasActual);
+  document.getElementById('tbody-quejas').innerHTML =
+    renderFilasAgrupadas(filtradas, q=>q.fecha, filaQ, 8, ETIQUETAS_QUEJAS, 'Sin quejas registradas.');
+}
+
+function filtrarQuejas(estado, btn) {
+  filtroQuejasActual = estado;
+  btn.parentElement.querySelectorAll('.filtro-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderQuejas(todasLasQuejas);
+}
+
+async function marcarQuejaResuelta(id, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+  try {
+    const r = await fetchAuth(`/api/quejas/${id}/resuelta`, {method:'PATCH'});
+    if (!r.ok) { btn.disabled = false; btn.textContent = '✓ Marcar resuelta'; return; }
+    await cargarQuejas();
+  } catch {
+    btn.disabled = false;
+    btn.textContent = '✓ Marcar resuelta';
+  }
 }
 
 async function cambiarEstado(tipo, id, estado) {
@@ -969,6 +1067,31 @@ async function agregarCupon() {
     mostrarMsg('ac-msg', `Cupón "${codigo}" creado.`, true);
     cargarAdminCupones();
   } catch { mostrarMsg('ac-msg', 'Error de conexión.', false); }
+}
+
+// NUEVO (25-sep-2026, pedido por Diego): reporte financiero/operativo en
+// Excel (ventas, cupones/descuentos, quejas, reservaciones) para un rango de
+// fechas, solo visible en la Vista Gerente. Se descarga navegando el
+// navegador directo a la URL (no con fetch+blob) porque asi el navegador
+// maneja la descarga solo, usando el header Content-Disposition que manda
+// el servidor -- el token va en la URL como query param porque esta
+// descarga no pasa por fetchAuth (no hay forma de mandar el header
+// Authorization en una navegación normal), y el backend ya acepta el token
+// tambien por query param (ver extraerToken en auth.js).
+function descargarReporte() {
+  const desde = document.getElementById('rep-desde').value;
+  const hasta = document.getElementById('rep-hasta').value;
+  if (!desde || !hasta) return mostrarMsg('rep-msg', 'Elige el rango de fechas.', false);
+  if (desde > hasta) return mostrarMsg('rep-msg', 'La fecha "desde" no puede ser posterior a "hasta".', false);
+  const token = localStorage.getItem('mrsushi_token');
+  const params = new URLSearchParams({ desde, hasta, token });
+  const a = document.createElement('a');
+  a.href = '/api/reportes/excel?' + params.toString();
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  mostrarMsg('rep-msg', 'Descargando reporte...', true);
 }
 </script>
 </body>
