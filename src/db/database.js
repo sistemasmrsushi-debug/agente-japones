@@ -257,7 +257,7 @@ async function guardarPedido(pedido) {
 // podria tener algo en el campo "sucursal" (no deberia, pero por seguridad
 // no se usa para el si tiene "sucursales" asignadas).
 async function obtenerPedidos(sucursal, rol, sucursales) {
-  if (rol === "supervisor" && Array.isArray(sucursales) && sucursales.length) {
+  if ((rol === "supervisor" || rol === "administrativo") && Array.isArray(sucursales) && sucursales.length) {
     const { rows } = await pool.query(
       "SELECT * FROM pedidos WHERE sucursal = ANY($1) ORDER BY fecha DESC LIMIT 200",
       [sucursales]
@@ -435,7 +435,7 @@ async function guardarReservacion(reservacion) {
 }
 
 async function obtenerReservaciones(sucursal, rol, sucursales) {
-  if (rol === "supervisor" && Array.isArray(sucursales) && sucursales.length) {
+  if ((rol === "supervisor" || rol === "administrativo") && Array.isArray(sucursales) && sucursales.length) {
     const { rows } = await pool.query(
       "SELECT * FROM reservaciones WHERE sucursal = ANY($1) ORDER BY fecha_registro DESC LIMIT 200",
       [sucursales]
@@ -737,7 +737,7 @@ async function guardarQueja(queja) {
 }
 
 async function obtenerQuejas(sucursal, rol, sucursales) {
-  if (rol === "supervisor" && Array.isArray(sucursales) && sucursales.length) {
+  if ((rol === "supervisor" || rol === "administrativo") && Array.isArray(sucursales) && sucursales.length) {
     const { rows } = await pool.query(
       "SELECT * FROM quejas WHERE sucursal = ANY($1) ORDER BY fecha DESC LIMIT 200",
       [sucursales]

@@ -66,7 +66,7 @@ html,body{height:100%;font-family:'Inter',sans-serif;background:var(--negro);col
 .tabla-wrap{border:1px solid var(--borde);overflow:hidden}
 table{width:100%;border-collapse:collapse}
 th{background:var(--gris1);color:var(--muted);padding:0.6rem 0.9rem;text-align:left;font-size:0.58rem;letter-spacing:0.12em;text-transform:uppercase;font-weight:500;border-bottom:1px solid var(--borde)}
-td{padding:0.75rem 0.9rem;font-size:0.75rem;border-bottom:1px solid var(--borde);vertical-align:top}
+td{padding:0.5rem 0.8rem;font-size:0.75rem;border-bottom:1px solid var(--borde);vertical-align:top;line-height:1.35}
 tr:last-child td{border-bottom:none}
 tr:hover td{background:var(--gris1)}
 .badge{display:inline-block;padding:0.15rem 0.5rem;font-size:0.58rem;letter-spacing:0.08em;text-transform:uppercase}
@@ -179,6 +179,10 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
         <button class="filtro-btn" onclick="filtrar('en_proceso',this)">En proceso</button>
         <button class="filtro-btn" onclick="filtrar('listo',this)">Listos</button>
         <button class="filtro-btn" onclick="filtrar('cancelado',this)">Cancelados</button>
+        <input class="admin-input" id="busqueda-pedidos" placeholder="Buscar por teléfono, nombre o ID..." oninput="renderPedidos(todosLosPedidos)" style="margin-left:auto;flex:0 1 240px;min-width:200px">
+        <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.62rem;color:var(--muted);white-space:nowrap;cursor:pointer">
+          <input type="checkbox" id="chk-historial" onchange="renderPedidos(todosLosPedidos)"> Mostrar historial completo
+        </label>
       </div>
       <div class="tabla-wrap">
         <table>
@@ -513,18 +517,20 @@ function filaP(p) {
   const telLimpio = (p.telefono_cliente||'').replace('whatsapp:','');
   const telLink = telLimpio ? `<a href="tel:${telLimpio}" style="color:var(--turquesa);text-decoration:none">${telLimpio}</a>` : '—';
   // Direccion para domicilios (p.direccion ya viene formateada por Google e
-  // incluye la colonia dentro del texto -- agregarla otra vez la duplicaba)
-  const direccionHtml = p.tipo==='domicilio' && p.direccion
-    ? `<div style="font-size:0.65rem;color:var(--muted);margin-top:0.3rem">📍 ${p.direccion}${p.referencias?'<br>Ref: '+p.referencias:''}</div>`
-    : '';
-  // GPS link si existe
-  const gpsHtml = p.ubicacion_gps?.maps_url
-    ? `<div style="margin-top:0.3rem"><a href="${p.ubicacion_gps.maps_url}" target="_blank" style="color:var(--verde);font-size:0.6rem;text-decoration:none">📌 Ver en mapa</a></div>`
+  // incluye la colonia dentro del texto -- agregarla otra vez la duplicaba).
+  // COMPACTADO (25-sep-2026, pedido por Diego): direccion y link de mapa
+  // ahora van en UNA sola línea (antes eran 2-3 líneas separadas), para que
+  // cada pedido ocupe menos espacio vertical en la tabla.
+  const partesUbicacion = [];
+  if (p.tipo==='domicilio' && p.direccion) partesUbicacion.push(`📍 ${p.direccion}${p.referencias?' (Ref: '+p.referencias+')':''}`);
+  if (p.ubicacion_gps?.maps_url) partesUbicacion.push(`<a href="${p.ubicacion_gps.maps_url}" target="_blank" style="color:var(--verde);text-decoration:none">📌 Mapa</a>`);
+  const direccionHtml = partesUbicacion.length
+    ? `<div style="font-size:0.62rem;color:var(--muted);margin-top:0.2rem">${partesUbicacion.join(' · ')}</div>`
     : '';
   return `<tr class="${urgente?'fila-urgente':''}">
     <td><div style="font-size:0.6rem;color:var(--muted)">${p.id}</div><div style="font-size:0.65rem;color:${urgente?'var(--rojo)':'var(--muted)'}">${fechaCorta} · ${hora}${urgente?' ⚠ 5+ min':''}</div></td>
-    <td>${p.nombre_cliente ? `<div style="font-weight:600">${p.nombre_cliente}</div>` : ''}${telLink}</td>
-    <td>${items}${direccionHtml}${gpsHtml}</td>
+    <td>${p.nombre_cliente ? `<span style="font-weight:600">${p.nombre_cliente}</span> · ` : ''}${telLink}</td>
+    <td>${items}${direccionHtml}</td>
     <td>${p.sucursal||'—'}</td>
     <td style="font-size:0.7rem">${tipo}</td>
     <td style="color:var(--turquesa)">${total!=='—'?'$'+total+' MXN':'—'}${descuento>0?`<div style="font-size:0.6rem;color:var(--verde)">🎟️ ${p.cupon_codigo} (-$${descuento})</div>`:''}</td>
@@ -574,8 +580,30 @@ const CATEGORIAS_QUEJA = {
   otro: 'Otro',
 };
 
+// NUEVO (25-sep-2026, pedido por Diego: "no quiero que haya pedidos que
+// puedan confundirse"): la vista "Todos" ya no mostraba nunca menos de 200
+// pedidos, así que con el tiempo se llenaba de pedidos ya resueltos (listos,
+// cancelados o con pago vencido) de hace semanas, mezclados con los de hoy.
+// Ahora, por default, esos ya-resueltos se ocultan si no son de hoy -- se
+// pueden recuperar buscando (teléfono/nombre/ID), marcando "Mostrar historial
+// completo", o entrando directo a su pestaña (Listos/Cancelados).
+function esHistorialViejo(p) {
+  if (p.estado !== 'listo' && p.estado !== 'cancelado' && p.estado !== 'pendiente_pago') return false;
+  return categoriaFecha(p.fecha) !== 'hoy';
+}
+
 function renderPedidos(pedidos) {
-  const filtrados = filtroActual==='todos' ? pedidos : pedidos.filter(p=>p.estado===filtroActual);
+  let filtrados = filtroActual==='todos' ? pedidos : pedidos.filter(p=>p.estado===filtroActual);
+  const busqueda = (document.getElementById('busqueda-pedidos')?.value || '').trim().toLowerCase();
+  if (busqueda) {
+    filtrados = filtrados.filter(p =>
+      (p.id||'').toLowerCase().includes(busqueda) ||
+      (p.nombre_cliente||'').toLowerCase().includes(busqueda) ||
+      (p.telefono_cliente||'').toLowerCase().includes(busqueda)
+    );
+  } else if (filtroActual==='todos' && !document.getElementById('chk-historial')?.checked) {
+    filtrados = filtrados.filter(p => !esHistorialViejo(p));
+  }
   document.getElementById('tbody-pedidos').innerHTML =
     renderFilasAgrupadas(filtrados, p=>p.fecha, filaP, 8, ETIQUETAS_PEDIDOS, 'Sin pedidos.');
 }
