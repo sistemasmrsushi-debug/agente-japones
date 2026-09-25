@@ -6,10 +6,17 @@
 <title>Mr. Sushi — Panel de Control</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
+/* NUEVO (25-sep-2026, pedido por Diego): tema claro en vez de oscuro,
+   manteniendo los mismos colores de marca (turquesa/verde/naranja/rojo).
+   Los NOMBRES de las variables se dejan igual que antes (--negro, --carbon,
+   --blanco, etc.) para no tener que tocar cada regla del archivo -- pero ya
+   no significan literalmente su color: --negro ahora es el fondo claro de
+   la pagina, --carbon es el blanco de las tarjetas/superficies, etc. Es el
+   mismo patron que un toggle de modo oscuro/claro, solo que fijo en claro. */
 :root {
   --turquesa: #00AEBE; --turquesa-h: #009BAD; --turquesa-light: #E6F7F9;
-  --negro: #111111; --carbon: #1A1A1A; --gris1: #242424; --gris2: #2E2E2E;
-  --texto: #E8E4DF; --muted: #888078; --borde: #2A2A2A; --blanco: #FEFCFA;
+  --negro: #F5F1EA; --carbon: #FFFFFF; --gris1: #F1ECE3; --gris2: #E9E2D6;
+  --texto: #2B2620; --muted: #79695D; --borde: #E4DDD0; --blanco: #FFFFFF;
   --verde: #1E8C4A; --naranja: #D4860A; --rojo: #C0392B;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -20,7 +27,7 @@ html,body{height:100%;font-family:'Inter',sans-serif;background:var(--negro);col
 .login-logo{text-align:center;margin-bottom:1.5rem}
 .login-logo img{height:45px;object-fit:contain}
 .login-title{font-size:0.65rem;letter-spacing:0.2em;text-transform:uppercase;color:var(--muted);margin-bottom:0.3rem}
-.login-sub{font-size:1.3rem;color:var(--blanco);margin-bottom:1.8rem;font-weight:600}
+.login-sub{font-size:1.3rem;color:var(--texto);margin-bottom:1.8rem;font-weight:600}
 .login-label{font-size:0.6rem;letter-spacing:0.15em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:0.4rem}
 .login-input{width:100%;background:var(--gris1);border:1px solid var(--borde);color:var(--texto);font-family:'DM Mono',monospace;font-size:0.9rem;padding:0.65rem 0.8rem;margin-bottom:1.2rem;outline:none;transition:border-color 0.2s}
 .login-input:focus{border-color:var(--turquesa)}
@@ -32,7 +39,7 @@ html,body{height:100%;font-family:'Inter',sans-serif;background:var(--negro);col
 .header-left{display:flex;align-items:center;gap:1rem}
 .header-logo img{height:32px;object-fit:contain}
 .header-info{display:flex;flex-direction:column}
-.header-name{font-size:0.85rem;color:var(--blanco);font-weight:600}
+.header-name{font-size:0.85rem;color:var(--texto);font-weight:600}
 .header-sucursal{font-size:0.6rem;letter-spacing:0.12em;text-transform:uppercase;color:var(--turquesa)}
 .header-right{display:flex;align-items:center;gap:1rem}
 .header-time{font-size:0.75rem;color:var(--muted);font-family:'DM Mono',monospace}
@@ -63,12 +70,12 @@ td{padding:0.75rem 0.9rem;font-size:0.75rem;border-bottom:1px solid var(--borde)
 tr:last-child td{border-bottom:none}
 tr:hover td{background:var(--gris1)}
 .badge{display:inline-block;padding:0.15rem 0.5rem;font-size:0.58rem;letter-spacing:0.08em;text-transform:uppercase}
-.badge.pendiente{background:#2A1E00;color:var(--naranja)}
-.badge.en_proceso{background:#001830;color:#1A6FA8}
-.badge.listo{background:#001A0E;color:var(--verde)}
-.badge.cancelado{background:#1A1A1A;color:var(--muted)}
-.badge.confirmada{background:#001A0E;color:var(--verde)}
-.badge.cancelada{background:#1A1A1A;color:var(--muted)}
+.badge.pendiente{background:#FBF0DC;color:var(--naranja)}
+.badge.en_proceso{background:#E5F1FA;color:#1A6FA8}
+.badge.listo{background:#E3F5EA;color:var(--verde)}
+.badge.cancelado{background:var(--gris1);color:var(--muted)}
+.badge.confirmada{background:#E3F5EA;color:var(--verde)}
+.badge.cancelada{background:var(--gris1);color:var(--muted)}
 .acciones{display:flex;gap:0.3rem;flex-wrap:wrap}
 .btn-accion{background:none;border:1px solid var(--borde);color:var(--muted);font-size:0.58rem;letter-spacing:0.06em;text-transform:uppercase;padding:0.2rem 0.5rem;cursor:pointer;transition:all 0.15s;font-family:'Inter',sans-serif}
 .btn-accion.verde:hover{background:var(--verde);border-color:var(--verde);color:var(--blanco)}
@@ -83,7 +90,7 @@ tr:hover td{background:var(--gris1)}
 .conectividad-item{display:flex;align-items:center;gap:0.4rem;background:var(--carbon);border:1px solid var(--borde);padding:0.4rem 0.7rem;font-size:0.7rem}
 .punto{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .punto.online{background:var(--verde);box-shadow:0 0 4px var(--verde)}
-.punto.offline{background:#3A3A3A}
+.punto.offline{background:#C9C2B8}
 .conectividad-item.offline{color:var(--muted)}
 .sucursal-card{background:var(--carbon);padding:1.2rem 1.5rem}
 .sc-nombre{font-size:0.65rem;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);margin-bottom:0.5rem}
@@ -112,7 +119,7 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
 .admin-msg.ok{color:var(--verde)}
 .admin-msg.err{color:var(--rojo)}
 .celda-input{padding:0.4rem !important}
-::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:var(--negro)}::-webkit-scrollbar-thumb{background:var(--borde)}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:var(--negro)}::-webkit-scrollbar-thumb{background:#D6CDBF}
 </style>
 </head>
 <body>
@@ -445,7 +452,7 @@ function filaP(p) {
   // NUEVO (31-ago-2026, pedido por Diego): si el cliente pidio una
   // modificacion al platillo (ej. "sin pepino", "cambiar salmon por atun"),
   // se resalta junto al item para que la cocina no se la pierda.
-  const items = Array.isArray(p.items) ? p.items.map(i=>`${i.cantidad||1}× ${i.nombre}${i.modificaciones?` <b style="color:#c0392b">(${i.modificaciones})</b>`:''}`).join(', ') : (p.items||'—');
+  const items = Array.isArray(p.items) ? p.items.map(i=>`${i.cantidad||1}× ${i.nombre}${i.modificaciones?` <b style="color:var(--rojo)">(${i.modificaciones})</b>`:''}`).join(', ') : (p.items||'—');
   const totalBase = Array.isArray(p.items) ? p.items.reduce((s,i)=>s+(i.precio||0)*(i.cantidad||1),0) : '—';
   // NUEVO (21-sep-2026, cupones de descuento): si el pedido tiene un cupon
   // aplicado, mostrar el total YA descontado (lo que en realidad se cobra),
@@ -951,7 +958,7 @@ function renderAdminUsuarios(usuarios) {
     <tr>
       <td style="font-weight:600">${u.usuario}</td>
       <td>${u.sucursal || '—'}</td>
-      <td><span class="badge" style="background:${u.rol==='gerente'?'#001830':'#1A1A1A'};color:${u.rol==='gerente'?'#1A6FA8':'var(--muted)'}">${u.rol}</span></td>
+      <td><span class="badge" style="background:${u.rol==='gerente'?'#E5F1FA':'var(--gris1)'};color:${u.rol==='gerente'?'#1A6FA8':'var(--muted)'}">${u.rol}</span></td>
       <td class="celda-input"><input class="admin-input-edit" type="text" placeholder="Nueva contraseña (mín. 8)" id="pw-${u.usuario}"></td>
       <td>
         <div class="acciones">
