@@ -161,6 +161,7 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
     <button class="tab active" id="tab-pedidos" onclick="cambiarTab('pedidos')">Pedidos</button>
     <button class="tab" id="tab-reservaciones" onclick="cambiarTab('reservaciones')">Reservaciones</button>
     <button class="tab" id="tab-quejas" onclick="cambiarTab('quejas')">Quejas</button>
+    <button class="tab" id="tab-reportes" onclick="cambiarTab('reportes')" style="display:none">Reportes</button>
     <button class="tab" id="tab-gerente" onclick="cambiarTab('gerente')" style="display:none">Vista Gerente</button>
     <button class="tab" id="tab-admin" onclick="cambiarTab('admin')" style="display:none">Administración</button>
     <button class="refresh-btn" onclick="cargarDatos()">↻ Actualizar</button>
@@ -212,19 +213,21 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
         </table>
       </div>
     </div>
-    <div class="panel" id="panel-gerente">
+    <div class="panel" id="panel-reportes">
       <div class="conectividad-wrap">
-        <div class="conectividad-titulo">Descargar reporte (Excel)</div>
+        <div class="conectividad-titulo" id="rep-sucursales-titulo-fecha">Descargar reporte (Excel)</div>
         <div class="admin-form">
           <input class="admin-input admin-input-sm" id="rep-desde" type="date">
           <span style="color:var(--muted);font-size:0.7rem">a</span>
           <input class="admin-input admin-input-sm" id="rep-hasta" type="date">
           <button class="btn-guardar" onclick="descargarReporte()">⬇ Descargar Excel</button>
         </div>
-        <div class="conectividad-titulo" style="margin-top:0.4rem">Sucursales a incluir (ninguna marcada = todas)</div>
+        <div class="conectividad-titulo" id="rep-sucursales-titulo" style="margin-top:0.4rem">Sucursales a incluir (ninguna marcada = todas)</div>
         <div class="conectividad-grid" id="rep-sucursales-grid"></div>
         <div class="admin-msg" id="rep-msg"></div>
       </div>
+    </div>
+    <div class="panel" id="panel-gerente">
       <div class="conectividad-wrap">
         <div class="conectividad-titulo">Sucursales conectadas ahora</div>
         <div class="conectividad-grid" id="conectividad-grid"></div>
@@ -281,19 +284,24 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
         <div class="admin-form">
           <input class="admin-input" id="au-usuario" placeholder="usuario (minúsculas, sin espacios)">
           <input class="admin-input" id="au-password" type="text" placeholder="Contraseña (mín. 8 caracteres)">
-          <input class="admin-input" id="au-sucursal" placeholder="Sucursal (dejar vacío si es gerente)">
+          <select class="admin-input" id="au-sucursal">
+            <option value="">— Sin sucursal única (gerente/supervisor/administrativo) —</option>
+          </select>
           <select class="admin-input admin-input-sm" id="au-rol" onchange="cambiarRolNuevoUsuario()">
             <option value="sucursal">Sucursal</option>
             <option value="supervisor">Supervisor (varias sucursales)</option>
+            <option value="administrativo">Administrativo (solo ver/descargar)</option>
             <option value="gerente">Gerente</option>
           </select>
           <button class="btn-guardar" onclick="agregarUsuario()">+ Agregar</button>
         </div>
-        <!-- NUEVO (26-sep-2026, pedido por Diego): rol "supervisor" -- ve
-             varias sucursales combinadas a la vez (ej. un regional con 3
-             sucursales). Solo se muestra cuando se elige ese rol arriba. -->
+        <!-- NUEVO (26-sep-2026, pedido por Diego): roles "supervisor" (ve
+             varias sucursales combinadas, ej. un regional con 3 sucursales)
+             y "administrativo" (solo ver/descargar, sin editar nada) -- ambos
+             necesitan elegir a que sucursales tienen acceso. Solo se muestra
+             cuando se elige alguno de esos roles arriba. -->
         <div class="admin-form" id="au-sucursales-wrap" style="display:none">
-          <div class="conectividad-titulo" style="margin-bottom:0">Sucursales del supervisor:</div>
+          <div class="conectividad-titulo" style="margin-bottom:0" id="au-sucursales-titulo">Sucursales:</div>
           <div class="conectividad-grid" id="au-sucursales-grid"></div>
         </div>
         <div class="admin-msg" id="au-msg"></div>
@@ -356,15 +364,25 @@ async function login() {
     localStorage.setItem('mrsushi_token', data.token);
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
-    // NUEVO (26-sep-2026, pedido por Diego): rol "supervisor" -- ve varias
-    // sucursales combinadas, se muestra la lista en el encabezado.
+    // NUEVO (26-sep-2026, pedido por Diego): roles "supervisor" (ve varias
+    // sucursales combinadas) y "administrativo" (solo ver/descargar, ve
+    // varias sucursales pero sin poder editar nada) -- ambos muestran su
+    // lista de sucursales en el encabezado.
     document.getElementById('header-sucursal').textContent =
       sesion.rol==='gerente' ? 'Gerente General' :
       sesion.rol==='supervisor' ? `Supervisor · ${(sesion.sucursales||[]).join(', ')}` :
+      sesion.rol==='administrativo' ? `Administrativo · ${(sesion.sucursales||[]).join(', ')}` :
       sesion.sucursal;
     if (sesion.rol==='gerente') document.getElementById('tab-gerente').style.display='inline-block';
     if (sesion.rol==='gerente') document.getElementById('tab-admin').style.display='inline-block';
-    if (sesion.rol==='gerente') {
+    if (sesion.rol==='gerente' || sesion.rol==='administrativo') document.getElementById('tab-reportes').style.display='inline-block';
+    // El rol "administrativo" solo debe ver Pedidos + Reportes -- nada de
+    // Quejas ni Reservaciones (asi lo pidio Diego).
+    if (sesion.rol==='administrativo') {
+      document.getElementById('tab-reservaciones').style.display='none';
+      document.getElementById('tab-quejas').style.display='none';
+    }
+    if (sesion.rol==='gerente' || sesion.rol==='administrativo') {
       // Rango por default del reporte: del 1ro del mes actual a hoy, para
       // que nunca se quede vacio (ver reporte de Diego que solo arrojo 3
       // pedidos -- resultó ser que no habia elegido fechas antes de
@@ -383,7 +401,11 @@ function logout() { sesion=null; localStorage.removeItem('mrsushi_token'); docum
 
 async function cargarDatos() {
   if (!sesion) return;
-  await Promise.all([cargarPedidos(), cargarReservaciones(), cargarQuejas()]);
+  // El rol "administrativo" no tiene pestañas de Reservaciones ni Quejas
+  // (solo ve Pedidos + Reportes), asi que no tiene sentido pedirle esos
+  // datos al servidor de mas.
+  const tareas = sesion.rol==='administrativo' ? [cargarPedidos()] : [cargarPedidos(), cargarReservaciones(), cargarQuejas()];
+  await Promise.all(tareas);
   if (sesion.rol==='gerente') cargarStats();
 }
 
@@ -501,7 +523,12 @@ function filaP(p) {
   // NINGUN boton de accion -- Diego tenia que resolverlo manualmente fuera
   // del dashboard. Solo aplica a domicilio: los pedidos de sucursal no usan
   // link de pago (se pagan en persona).
-  const acciones = p.estado==='pendiente' ? `
+  // NUEVO (26-sep-2026, pedido por Diego): rol "administrativo" -- solo ve,
+  // no puede aceptar/editar pedidos ni reenviar links. El servidor tambien
+  // lo bloquea (bloquearSoloLectura en dashboard.js) por si alguien intenta
+  // llamar la API directo; esto solo evita que el boton aparezca.
+  const soloLectura = sesion?.rol === 'administrativo';
+  const acciones = soloLectura ? '' : (p.estado==='pendiente' ? `
     <button class="btn-accion verde" onclick="aceptarPedido('${p.id}')">✓ Aceptar pedido</button>
   ` : p.estado==='en_proceso' ? `
     <button class="btn-accion azul" onclick="cambiarEstado('pedido','${p.id}','listo')">✓ Pedido listo</button>
@@ -511,7 +538,7 @@ function filaP(p) {
     <span style="color:var(--muted);font-size:0.65rem">Cancelado</span>
   ` : p.estado==='pendiente_pago' && p.tipo==='domicilio' ? `
     <button class="btn-accion azul" onclick="reenviarLink('${p.id}', this)">🔁 Reenviar link</button>
-  ` : '';
+  ` : '');
   const tipo = p.tipo==='domicilio' ? '🚚 Domicilio' : '🏪 Sucursal';
   // Telefono como link de llamada
   const telLimpio = (p.telefono_cliente||'').replace('whatsapp:','');
@@ -704,6 +731,7 @@ function cambiarTab(tab) {
   document.getElementById('panel-'+tab).classList.add('active');
   if(tab==='gerente') cargarStats();
   if(tab==='admin') cambiarSubtabAdmin('menu');
+  if(tab==='reportes') cargarReportesPanel();
 }
 
 let alarmaInterval = null;
@@ -1010,9 +1038,9 @@ async function cargarAdminUsuarios() {
 function renderAdminUsuarios(usuarios) {
   const tbody = document.getElementById('tbody-admin-usuarios');
   tbody.innerHTML = usuarios.length ? usuarios.map(u => {
-    const colorFondo = u.rol==='gerente' ? '#E5F1FA' : (u.rol==='supervisor' ? 'var(--turquesa-light)' : 'var(--gris1)');
+    const colorFondo = u.rol==='gerente' ? '#E5F1FA' : (u.rol==='supervisor' ? 'var(--turquesa-light)' : (u.rol==='administrativo' ? 'var(--gris2)' : 'var(--gris1)'));
     const colorTexto = u.rol==='gerente' ? '#1A6FA8' : (u.rol==='supervisor' ? 'var(--turquesa-h)' : 'var(--muted)');
-    const sucursalTexto = u.rol==='supervisor' ? ((u.sucursales||[]).join(', ') || '—') : (u.sucursal || '—');
+    const sucursalTexto = (u.rol==='supervisor' || u.rol==='administrativo') ? ((u.sucursales||[]).join(', ') || '—') : (u.sucursal || '—');
     return `
     <tr>
       <td style="font-weight:600">${u.usuario}</td>
@@ -1061,7 +1089,7 @@ async function agregarUsuario() {
   const sucursales = [...document.querySelectorAll('.au-sucursal-chk:checked')].map(c => c.value);
   if (!usuario || !password) return mostrarMsg('au-msg', 'Usuario y contraseña son obligatorios.', false);
   if (password.length < 8) return mostrarMsg('au-msg', 'La contraseña debe tener al menos 8 caracteres.', false);
-  if (rol === 'supervisor' && !sucursales.length) return mostrarMsg('au-msg', 'Selecciona al menos una sucursal para el supervisor.', false);
+  if ((rol === 'supervisor' || rol === 'administrativo') && !sucursales.length) return mostrarMsg('au-msg', 'Selecciona al menos una sucursal.', false);
   try {
     const r = await fetchAuth('/api/admin/usuarios', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({usuario,password,sucursal,rol,sucursales}) });
     const data = await r.json();
@@ -1186,23 +1214,55 @@ function descargarReporte() {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  mostrarMsg('rep-msg', seleccionadas.length ? `Descargando reporte de ${seleccionadas.length} sucursal(es)...` : 'Descargando reporte de todas las sucursales...', true);
+  // NUEVO (26-sep-2026): para "administrativo" el servidor siempre fuerza
+  // sus sucursales asignadas sin importar el checklist (que ni se le
+  // muestra), asi que el mensaje aqui se ajusta para no decir "todas".
+  const mensaje = sesion.rol==='administrativo'
+    ? `Descargando reporte de tus sucursales asignadas (${(sesion.sucursales||[]).join(', ')})...`
+    : (seleccionadas.length ? `Descargando reporte de ${seleccionadas.length} sucursal(es)...` : 'Descargando reporte de todas las sucursales...');
+  mostrarMsg('rep-msg', mensaje, true);
 }
 
-// ---------- USUARIOS: rol "supervisor" (varias sucursales) ----------
+// NUEVO (26-sep-2026, pedido por Diego): rol "administrativo" -- el
+// checklist de sucursales del reporte para gerente ya se llena solo cada
+// 30s (ver cargarConectividad(), que corre dentro de cargarStats()), pero
+// administrativo no llama esa función (es gerente-only, usa
+// /api/sesiones-activas que administrativo no puede ver). Para
+// administrativo se le muestra, fijo y sin checkboxes, la lista de
+// sucursales que ya tiene asignadas -- el servidor de todos modos ignora
+// cualquier otra cosa que se le mande (ver requireReportes en dashboard.js).
+function cargarReportesPanel() {
+  if (sesion.rol !== 'administrativo') return;
+  document.getElementById('rep-sucursales-titulo').textContent = 'Sucursales incluidas (asignadas a tu usuario)';
+  document.getElementById('rep-sucursales-grid').innerHTML = (sesion.sucursales||[]).length
+    ? sesion.sucursales.map(s => `<div class="conectividad-item">${s}</div>`).join('')
+    : '<span style="color:var(--muted);font-size:0.7rem">Sin sucursales asignadas -- pide al gerente que te asigne alguna.</span>';
+}
+
+// ---------- USUARIOS: roles "supervisor" y "administrativo" (varias sucursales) ----------
 
 function cambiarRolNuevoUsuario() {
   const rol = document.getElementById('au-rol').value;
-  document.getElementById('au-sucursales-wrap').style.display = rol === 'supervisor' ? 'flex' : 'none';
+  const necesitaSucursales = rol === 'supervisor' || rol === 'administrativo';
+  document.getElementById('au-sucursales-wrap').style.display = necesitaSucursales ? 'flex' : 'none';
+  document.getElementById('au-sucursales-titulo').textContent = rol === 'administrativo' ? 'Sucursales que puede ver:' : 'Sucursales del supervisor:';
 }
 
 async function cargarAuSucursalesChecklist() {
   try {
-    const sucursales = await (await fetchAuth('/api/admin/sucursales')).json();
+    const sucursales = await (await fetchAuth('/api/sucursales-nombres')).json();
     document.getElementById('au-sucursales-grid').innerHTML = sucursales.map(s => `
       <label class="conectividad-item" style="cursor:pointer">
         <input type="checkbox" class="au-sucursal-chk" value="${s.nombre}"> ${s.nombre}
       </label>`).join('');
+    // NUEVO: el select de "Sucursal" (para el rol "sucursal", una sola) ya
+    // no se escribe a mano -- se elige de esta misma lista, para que no
+    // haya errores de dedo que rompan el match con zonas_domicilio.
+    const select = document.getElementById('au-sucursal');
+    const valorPrevio = select.value;
+    select.innerHTML = '<option value="">— Sin sucursal única (gerente/supervisor/administrativo) —</option>' +
+      sucursales.map(s => `<option value="${s.nombre}">${s.nombre}</option>`).join('');
+    select.value = valorPrevio;
   } catch {}
 }
 </script>
