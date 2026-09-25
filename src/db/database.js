@@ -145,6 +145,13 @@ async function initDB() {
         actualizado TIMESTAMPTZ DEFAULT NOW()
       );
     `);
+    // NUEVO (26-sep-2026, pedido por Diego): rol "supervisor" -- ve varias
+    // sucursales combinadas a la vez (a diferencia de "sucursal", que solo ve
+    // una), sin llegar a ser "gerente" (que ve todas + administracion). Se
+    // guarda como arreglo de Postgres (TEXT[]) porque un supervisor puede
+    // tener cualquier cantidad de sucursales asignadas. La columna "sucursal"
+    // (singular) sigue igual para el rol "sucursal" existente -- no se toca.
+    await client.query(`ALTER TABLE dashboard_usuarios ADD COLUMN IF NOT EXISTS sucursales TEXT[];`);
     // Memoria de la ultima direccion de domicilio usada por cada telefono, para
     // poder ofrecerla en pedidos futuros ("¿enviamos a tu direccion de
     // siempre?") en vez de pedirla desde cero cada vez. Se actualiza cada vez
@@ -243,7 +250,20 @@ async function guardarPedido(pedido) {
   ]);
 }
 
-async function obtenerPedidos(sucursal, rol) {
+// NUEVO (26-sep-2026, pedido por Diego): rol "supervisor" -- ve varias
+// sucursales combinadas (arreglo "sucursales"), a diferencia de "sucursal"
+// (una sola, con ILIKE) y "gerente" (todas, sin filtro). El orden de
+// revision importa: se checa "supervisor" primero porque ese rol tambien
+// podria tener algo en el campo "sucursal" (no deberia, pero por seguridad
+// no se usa para el si tiene "sucursales" asignadas).
+async function obtenerPedidos(sucursal, rol, sucursales) {
+  if (rol === "supervisor" && Array.isArray(sucursales) && sucursales.length) {
+    const { rows } = await pool.query(
+      "SELECT * FROM pedidos WHERE sucursal = ANY($1) ORDER BY fecha DESC LIMIT 200",
+      [sucursales]
+    );
+    return rows;
+  }
   let query = "SELECT * FROM pedidos ORDER BY fecha DESC LIMIT 200";
   let params = [];
   if (rol !== "gerente" && sucursal) {
@@ -414,7 +434,14 @@ async function guardarReservacion(reservacion) {
   ]);
 }
 
-async function obtenerReservaciones(sucursal, rol) {
+async function obtenerReservaciones(sucursal, rol, sucursales) {
+  if (rol === "supervisor" && Array.isArray(sucursales) && sucursales.length) {
+    const { rows } = await pool.query(
+      "SELECT * FROM reservaciones WHERE sucursal = ANY($1) ORDER BY fecha_registro DESC LIMIT 200",
+      [sucursales]
+    );
+    return rows;
+  }
   let query = "SELECT * FROM reservaciones ORDER BY fecha_registro DESC LIMIT 200";
   let params = [];
   if (rol !== "gerente" && sucursal) {
@@ -593,7 +620,7 @@ async function eliminarItemMenu(id) {
 
 async function obtenerUsuariosDashboard() {
   const { rows } = await pool.query(
-    "SELECT usuario, sucursal, rol, actualizado FROM dashboard_usuarios ORDER BY rol DESC, usuario"
+    "SELECT usuario, sucursal, sucursales, rol, actualizado FROM dashboard_usuarios ORDER BY rol DESC, usuario"
   );
   return rows; // nunca se devuelve la columna password
 }
@@ -606,12 +633,12 @@ async function obtenerUsuarioDashboardPorUsuario(usuario) {
   return rows[0] || null;
 }
 
-async function crearUsuarioDashboard({ usuario, password, sucursal, rol }) {
+async function crearUsuarioDashboard({ usuario, password, sucursal, rol, sucursales }) {
   const hash = await bcrypt.hash(password, 10);
   const { rows } = await pool.query(`
-    INSERT INTO dashboard_usuarios (usuario, password, sucursal, rol)
-    VALUES ($1,$2,$3,$4) RETURNING usuario, sucursal, rol, actualizado
-  `, [usuario.toLowerCase(), hash, sucursal || null, rol || "sucursal"]);
+    INSERT INTO dashboard_usuarios (usuario, password, sucursal, rol, sucursales)
+    VALUES ($1,$2,$3,$4,$5) RETURNING usuario, sucursal, sucursales, rol, actualizado
+  `, [usuario.toLowerCase(), hash, sucursal || null, rol || "sucursal", Array.isArray(sucursales) && sucursales.length ? sucursales : null]);
   return rows[0];
 }
 
@@ -709,7 +736,14 @@ async function guardarQueja(queja) {
   ]);
 }
 
-async function obtenerQuejas(sucursal, rol) {
+async function obtenerQuejas(sucursal, rol, sucursales) {
+  if (rol === "supervisor" && Array.isArray(sucursales) && sucursales.length) {
+    const { rows } = await pool.query(
+      "SELECT * FROM quejas WHERE sucursal = ANY($1) ORDER BY fecha DESC LIMIT 200",
+      [sucursales]
+    );
+    return rows;
+  }
   let query = "SELECT * FROM quejas ORDER BY fecha DESC LIMIT 200";
   let params = [];
   if (rol !== "gerente" && sucursal) {
@@ -746,7 +780,19 @@ async function obtenerPedidoMasRecientePorTelefono(telefono) {
 // ── REPORTES (rango de fechas, sin el LIMIT 200 que usa el dashboard normal
 // -- solo las usa el reporte de Excel del gerente, ver dashboard.js) ───────
 
-async function obtenerPedidosPorRango(desde, hasta) {
+// "sucursales" aqui es un FILTRO OPCIONAL que el gerente elige al pedir el
+// reporte (ver selector de sucursales en el dashboard) -- no un permiso de
+// acceso como en obtenerPedidos/obtenerQuejas/obtenerReservaciones (los
+// reportes son solo para gerente, que ya puede ver todo). Vacio/omitido =
+// todas las sucursales, igual que antes.
+async function obtenerPedidosPorRango(desde, hasta, sucursales) {
+  if (Array.isArray(sucursales) && sucursales.length) {
+    const { rows } = await pool.query(
+      "SELECT * FROM pedidos WHERE fecha >= $1 AND fecha < $2 AND sucursal = ANY($3) ORDER BY fecha ASC",
+      [desde, hasta, sucursales]
+    );
+    return rows;
+  }
   const { rows } = await pool.query(
     "SELECT * FROM pedidos WHERE fecha >= $1 AND fecha < $2 ORDER BY fecha ASC",
     [desde, hasta]
@@ -754,7 +800,14 @@ async function obtenerPedidosPorRango(desde, hasta) {
   return rows;
 }
 
-async function obtenerQuejasPorRango(desde, hasta) {
+async function obtenerQuejasPorRango(desde, hasta, sucursales) {
+  if (Array.isArray(sucursales) && sucursales.length) {
+    const { rows } = await pool.query(
+      "SELECT * FROM quejas WHERE fecha >= $1 AND fecha < $2 AND sucursal = ANY($3) ORDER BY fecha ASC",
+      [desde, hasta, sucursales]
+    );
+    return rows;
+  }
   const { rows } = await pool.query(
     "SELECT * FROM quejas WHERE fecha >= $1 AND fecha < $2 ORDER BY fecha ASC",
     [desde, hasta]
@@ -765,7 +818,14 @@ async function obtenerQuejasPorRango(desde, hasta) {
 // Se filtra por fecha_registro (cuando se hizo la reservacion), no por la
 // fecha de la reservacion en si (esa se guarda como texto libre, ej. "15 de
 // octubre", no como fecha real -- no se puede filtrar de forma confiable).
-async function obtenerReservacionesPorRango(desde, hasta) {
+async function obtenerReservacionesPorRango(desde, hasta, sucursales) {
+  if (Array.isArray(sucursales) && sucursales.length) {
+    const { rows } = await pool.query(
+      "SELECT * FROM reservaciones WHERE fecha_registro >= $1 AND fecha_registro < $2 AND sucursal = ANY($3) ORDER BY fecha_registro ASC",
+      [desde, hasta, sucursales]
+    );
+    return rows;
+  }
   const { rows } = await pool.query(
     "SELECT * FROM reservaciones WHERE fecha_registro >= $1 AND fecha_registro < $2 ORDER BY fecha_registro ASC",
     [desde, hasta]

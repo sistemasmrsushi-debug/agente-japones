@@ -108,12 +108,18 @@ router.get("/api/admin/usuarios", requireGerente, async (req, res) => {
 
 router.post("/api/admin/usuarios", requireGerente, async (req, res) => {
   try {
-    const { usuario, password, sucursal, rol } = req.body;
+    const { usuario, password, sucursal, rol, sucursales } = req.body;
     if (!usuario || !password) return res.status(400).json({ error: "Faltan usuario o contrasena" });
     if (password.length < 8) return res.status(400).json({ error: "La contrasena debe tener al menos 8 caracteres" });
+    // NUEVO (26-sep-2026, pedido por Diego): rol "supervisor" -- necesita al
+    // menos una sucursal asignada en el arreglo "sucursales", si no el
+    // usuario quedaria sin poder ver nada (ni siquiera con el filtro de
+    // "sucursal" normal, que no aplica para este rol).
+    if (rol === "supervisor" && (!Array.isArray(sucursales) || !sucursales.length))
+      return res.status(400).json({ error: "Selecciona al menos una sucursal para el supervisor" });
     const existente = await db.obtenerUsuarioDashboardPorUsuario(usuario);
     if (existente) return res.status(409).json({ error: "Ese usuario ya existe" });
-    const nuevo = await db.crearUsuarioDashboard({ usuario, password, sucursal, rol });
+    const nuevo = await db.crearUsuarioDashboard({ usuario, password, sucursal, rol, sucursales });
     res.json(nuevo);
   } catch (err) {
     logger.error("Error creando usuario: " + err.message);

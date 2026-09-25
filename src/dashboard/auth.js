@@ -18,9 +18,13 @@ const crypto = require("crypto");
 const SESIONES = new Map(); // token -> { usuario, rol, sucursal, expira }
 const DURACION_MS = 8 * 60 * 60 * 1000; // 8 horas
 
-function crearSesion({ usuario, rol, sucursal }) {
+// NUEVO (26-sep-2026, pedido por Diego): rol "supervisor" -- se le agrega
+// "sucursales" (arreglo) a la sesion, ademas de "sucursal" (que ya existia
+// para el rol "sucursal", una sola). Queda undefined para los roles que no
+// lo usan, sin romper nada de lo que ya dependia de esta funcion.
+function crearSesion({ usuario, rol, sucursal, sucursales }) {
   const token = crypto.randomBytes(32).toString("hex");
-  SESIONES.set(token, { usuario, rol, sucursal, expira: Date.now() + DURACION_MS, ultimaActividad: Date.now() });
+  SESIONES.set(token, { usuario, rol, sucursal, sucursales, expira: Date.now() + DURACION_MS, ultimaActividad: Date.now() });
   return token;
 }
 

@@ -217,6 +217,8 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
           <input class="admin-input admin-input-sm" id="rep-hasta" type="date">
           <button class="btn-guardar" onclick="descargarReporte()">⬇ Descargar Excel</button>
         </div>
+        <div class="conectividad-titulo" style="margin-top:0.4rem">Sucursales a incluir (ninguna marcada = todas)</div>
+        <div class="conectividad-grid" id="rep-sucursales-grid"></div>
         <div class="admin-msg" id="rep-msg"></div>
       </div>
       <div class="conectividad-wrap">
@@ -276,16 +278,24 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
           <input class="admin-input" id="au-usuario" placeholder="usuario (minúsculas, sin espacios)">
           <input class="admin-input" id="au-password" type="text" placeholder="Contraseña (mín. 8 caracteres)">
           <input class="admin-input" id="au-sucursal" placeholder="Sucursal (dejar vacío si es gerente)">
-          <select class="admin-input admin-input-sm" id="au-rol">
+          <select class="admin-input admin-input-sm" id="au-rol" onchange="cambiarRolNuevoUsuario()">
             <option value="sucursal">Sucursal</option>
+            <option value="supervisor">Supervisor (varias sucursales)</option>
             <option value="gerente">Gerente</option>
           </select>
           <button class="btn-guardar" onclick="agregarUsuario()">+ Agregar</button>
         </div>
+        <!-- NUEVO (26-sep-2026, pedido por Diego): rol "supervisor" -- ve
+             varias sucursales combinadas a la vez (ej. un regional con 3
+             sucursales). Solo se muestra cuando se elige ese rol arriba. -->
+        <div class="admin-form" id="au-sucursales-wrap" style="display:none">
+          <div class="conectividad-titulo" style="margin-bottom:0">Sucursales del supervisor:</div>
+          <div class="conectividad-grid" id="au-sucursales-grid"></div>
+        </div>
         <div class="admin-msg" id="au-msg"></div>
         <div class="tabla-wrap">
           <table>
-            <thead><tr><th>Usuario</th><th>Sucursal</th><th>Rol</th><th>Nueva contraseña</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>Usuario</th><th>Sucursal(es)</th><th>Rol</th><th>Nueva contraseña</th><th>Acciones</th></tr></thead>
             <tbody id="tbody-admin-usuarios"><tr><td colspan="5" class="vacio">Cargando...</td></tr></tbody>
           </table>
         </div>
@@ -342,9 +352,24 @@ async function login() {
     localStorage.setItem('mrsushi_token', data.token);
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
-    document.getElementById('header-sucursal').textContent = sesion.rol==='gerente' ? 'Gerente General' : sesion.sucursal;
+    // NUEVO (26-sep-2026, pedido por Diego): rol "supervisor" -- ve varias
+    // sucursales combinadas, se muestra la lista en el encabezado.
+    document.getElementById('header-sucursal').textContent =
+      sesion.rol==='gerente' ? 'Gerente General' :
+      sesion.rol==='supervisor' ? `Supervisor · ${(sesion.sucursales||[]).join(', ')}` :
+      sesion.sucursal;
     if (sesion.rol==='gerente') document.getElementById('tab-gerente').style.display='inline-block';
     if (sesion.rol==='gerente') document.getElementById('tab-admin').style.display='inline-block';
+    if (sesion.rol==='gerente') {
+      // Rango por default del reporte: del 1ro del mes actual a hoy, para
+      // que nunca se quede vacio (ver reporte de Diego que solo arrojo 3
+      // pedidos -- resultó ser que no habia elegido fechas antes de
+      // descargar).
+      const hoy = new Date();
+      const primerDia = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+      document.getElementById('rep-desde').value = formatoFechaLocal(primerDia);
+      document.getElementById('rep-hasta').value = formatoFechaLocal(hoy);
+    }
     cargarDatos();
     setInterval(cargarDatos, 30000);
   } catch { document.getElementById('login-error').textContent = 'Error de conexión'; }
@@ -421,6 +446,7 @@ async function cargarConectividad() {
       (await fetchAuth('/api/admin/sucursales')).json(),
       (await fetchAuth('/api/sesiones-activas')).json(),
     ]);
+    renderRepSucursales(sucursales);
     const conectadas = new Set(activas.filter(s=>s.sucursal).map(s=>s.sucursal));
     const gerenteConectado = activas.some(s=>s.rol==='gerente');
 
@@ -949,16 +975,21 @@ async function cargarAdminUsuarios() {
   try {
     const usuarios = await (await fetchAuth('/api/admin/usuarios')).json();
     renderAdminUsuarios(usuarios);
+    cargarAuSucursalesChecklist();
   } catch { mostrarMsg('au-msg', 'Error cargando usuarios.', false); }
 }
 
 function renderAdminUsuarios(usuarios) {
   const tbody = document.getElementById('tbody-admin-usuarios');
-  tbody.innerHTML = usuarios.length ? usuarios.map(u => `
+  tbody.innerHTML = usuarios.length ? usuarios.map(u => {
+    const colorFondo = u.rol==='gerente' ? '#E5F1FA' : (u.rol==='supervisor' ? 'var(--turquesa-light)' : 'var(--gris1)');
+    const colorTexto = u.rol==='gerente' ? '#1A6FA8' : (u.rol==='supervisor' ? 'var(--turquesa-h)' : 'var(--muted)');
+    const sucursalTexto = u.rol==='supervisor' ? ((u.sucursales||[]).join(', ') || '—') : (u.sucursal || '—');
+    return `
     <tr>
       <td style="font-weight:600">${u.usuario}</td>
-      <td>${u.sucursal || '—'}</td>
-      <td><span class="badge" style="background:${u.rol==='gerente'?'#E5F1FA':'var(--gris1)'};color:${u.rol==='gerente'?'#1A6FA8':'var(--muted)'}">${u.rol}</span></td>
+      <td>${sucursalTexto}</td>
+      <td><span class="badge" style="background:${colorFondo};color:${colorTexto}">${u.rol}</span></td>
       <td class="celda-input"><input class="admin-input-edit" type="text" placeholder="Nueva contraseña (mín. 8)" id="pw-${u.usuario}"></td>
       <td>
         <div class="acciones">
@@ -966,7 +997,8 @@ function renderAdminUsuarios(usuarios) {
           <button class="btn-accion rojo" onclick="eliminarUsuarioUI('${u.usuario}')">Eliminar</button>
         </div>
       </td>
-    </tr>`).join('') : '<tr><td colspan="5" class="vacio">Sin usuarios registrados.</td></tr>';
+    </tr>`;
+  }).join('') : '<tr><td colspan="5" class="vacio">Sin usuarios registrados.</td></tr>';
 }
 
 async function guardarPasswordUsuario(usuario) {
@@ -998,15 +1030,20 @@ async function agregarUsuario() {
   const password = document.getElementById('au-password').value;
   const sucursal = document.getElementById('au-sucursal').value.trim();
   const rol = document.getElementById('au-rol').value;
+  const sucursales = [...document.querySelectorAll('.au-sucursal-chk:checked')].map(c => c.value);
   if (!usuario || !password) return mostrarMsg('au-msg', 'Usuario y contraseña son obligatorios.', false);
   if (password.length < 8) return mostrarMsg('au-msg', 'La contraseña debe tener al menos 8 caracteres.', false);
+  if (rol === 'supervisor' && !sucursales.length) return mostrarMsg('au-msg', 'Selecciona al menos una sucursal para el supervisor.', false);
   try {
-    const r = await fetchAuth('/api/admin/usuarios', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({usuario,password,sucursal,rol}) });
+    const r = await fetchAuth('/api/admin/usuarios', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({usuario,password,sucursal,rol,sucursales}) });
     const data = await r.json();
     if (!r.ok) return mostrarMsg('au-msg', data.error || 'Error al crear usuario.', false);
     document.getElementById('au-usuario').value = '';
     document.getElementById('au-password').value = '';
     document.getElementById('au-sucursal').value = '';
+    document.getElementById('au-rol').value = 'sucursal';
+    document.querySelectorAll('.au-sucursal-chk:checked').forEach(c => c.checked = false);
+    document.getElementById('au-sucursales-wrap').style.display = 'none';
     mostrarMsg('au-msg', `Usuario "${usuario}" creado.`, true);
     cargarAdminUsuarios();
   } catch { mostrarMsg('au-msg', 'Error de conexión.', false); }
@@ -1085,20 +1122,60 @@ async function agregarCupon() {
 // descarga no pasa por fetchAuth (no hay forma de mandar el header
 // Authorization en una navegación normal), y el backend ya acepta el token
 // tambien por query param (ver extraerToken en auth.js).
+// Formatea una fecha en YYYY-MM-DD usando los componentes LOCALES del
+// navegador (no toISOString, que convierte a UTC y puede recorrer al dia
+// siguiente/anterior cerca de la medianoche segun el huso horario).
+function formatoFechaLocal(d) {
+  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+
+// NUEVO (26-sep-2026, pedido por Diego): selector de sucursales para el
+// reporte -- sin ninguna marcada, el reporte incluye TODAS (mismo
+// comportamiento de antes). Se llama desde cargarConectividad(), que ya
+// trae la lista de sucursales para la seccion de "conectadas ahora".
+function renderRepSucursales(sucursales) {
+  const grid = document.getElementById('rep-sucursales-grid');
+  if (!grid) return;
+  grid.innerHTML = sucursales.map(s => `
+    <label class="conectividad-item" style="cursor:pointer">
+      <input type="checkbox" class="rep-sucursal-chk" value="${s.nombre}"> ${s.nombre}
+    </label>`).join('');
+}
+
 function descargarReporte() {
   const desde = document.getElementById('rep-desde').value;
   const hasta = document.getElementById('rep-hasta').value;
   if (!desde || !hasta) return mostrarMsg('rep-msg', 'Elige el rango de fechas.', false);
   if (desde > hasta) return mostrarMsg('rep-msg', 'La fecha "desde" no puede ser posterior a "hasta".', false);
   const token = localStorage.getItem('mrsushi_token');
+  const seleccionadas = [...document.querySelectorAll('.rep-sucursal-chk:checked')].map(c => c.value);
   const params = new URLSearchParams({ desde, hasta, token });
+  seleccionadas.forEach(s => params.append('sucursales', s));
   const a = document.createElement('a');
   a.href = '/api/reportes/excel?' + params.toString();
   a.download = '';
   document.body.appendChild(a);
   a.click();
   a.remove();
-  mostrarMsg('rep-msg', 'Descargando reporte...', true);
+  mostrarMsg('rep-msg', seleccionadas.length ? `Descargando reporte de ${seleccionadas.length} sucursal(es)...` : 'Descargando reporte de todas las sucursales...', true);
+}
+
+// ---------- USUARIOS: rol "supervisor" (varias sucursales) ----------
+
+function cambiarRolNuevoUsuario() {
+  const rol = document.getElementById('au-rol').value;
+  document.getElementById('au-sucursales-wrap').style.display = rol === 'supervisor' ? 'flex' : 'none';
+}
+
+async function cargarAuSucursalesChecklist() {
+  try {
+    const sucursales = await (await fetchAuth('/api/admin/sucursales')).json();
+    document.getElementById('au-sucursales-grid').innerHTML = sucursales.map(s => `
+      <label class="conectividad-item" style="cursor:pointer">
+        <input type="checkbox" class="au-sucursal-chk" value="${s.nombre}"> ${s.nombre}
+      </label>`).join('');
+  } catch {}
 }
 </script>
 </body>

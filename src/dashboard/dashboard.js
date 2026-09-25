@@ -65,8 +65,8 @@ router.post("/api/login", async (req, res) => {
     const coincide = user && await bcrypt.compare(password, user.password);
     if (!coincide)
       return res.status(401).json({ error: "Usuario o contrasena incorrectos" });
-    const token = crearSesion({ usuario: user.usuario, rol: user.rol, sucursal: user.sucursal });
-    res.json({ ok: true, token, rol: user.rol, sucursal: user.sucursal, usuario: user.usuario });
+    const token = crearSesion({ usuario: user.usuario, rol: user.rol, sucursal: user.sucursal, sucursales: user.sucursales });
+    res.json({ ok: true, token, rol: user.rol, sucursal: user.sucursal, sucursales: user.sucursales, usuario: user.usuario });
   } catch (err) {
     logger.error("Error en login: " + err.message);
     res.status(500).json({ error: "Error interno" });
@@ -81,8 +81,8 @@ router.post("/api/logout", requireAuth, (req, res) => {
 
 router.get("/api/pedidos", requireAuth, async (req, res) => {
   try {
-    const { rol, sucursal } = req.sesion; // viene del token, no del query param del cliente
-    const pedidos = await db.obtenerPedidos(sucursal, rol);
+    const { rol, sucursal, sucursales } = req.sesion; // viene del token, no del query param del cliente
+    const pedidos = await db.obtenerPedidos(sucursal, rol, sucursales);
     res.json(pedidos);
   } catch (err) {
     logger.error("Error obteniendo pedidos: " + err.message);
@@ -96,8 +96,8 @@ router.get("/api/pedidos", requireAuth, async (req, res) => {
 // el dashboard las muestre, filtradas por sucursal igual que los pedidos.
 router.get("/api/quejas", requireAuth, async (req, res) => {
   try {
-    const { rol, sucursal } = req.sesion;
-    const quejas = await db.obtenerQuejas(sucursal, rol);
+    const { rol, sucursal, sucursales } = req.sesion;
+    const quejas = await db.obtenerQuejas(sucursal, rol, sucursales);
     res.json(quejas);
   } catch (err) {
     logger.error("Error obteniendo quejas: " + err.message);
@@ -123,8 +123,8 @@ router.patch("/api/quejas/:id/resuelta", requireAuth, async (req, res) => {
 
 router.get("/api/reservaciones", requireAuth, async (req, res) => {
   try {
-    const { rol, sucursal } = req.sesion;
-    const reservaciones = await db.obtenerReservaciones(sucursal, rol);
+    const { rol, sucursal, sucursales } = req.sesion;
+    const reservaciones = await db.obtenerReservaciones(sucursal, rol, sucursales);
     res.json(reservaciones);
   } catch (err) {
     logger.error("Error obteniendo reservaciones: " + err.message);
@@ -246,10 +246,18 @@ router.get("/api/reportes/excel", requireGerente, async (req, res) => {
     }
     hastaFecha.setDate(hastaFecha.getDate() + 1);
 
+    // NUEVO (26-sep-2026, pedido por Diego): filtro opcional de sucursales
+    // para el reporte -- llega como "sucursales=A&sucursales=B" (Express lo
+    // arma como arreglo) o "sucursales=A,B" (un solo string), segun como lo
+    // mande el navegador. Vacio/omitido = todas (comportamiento de antes).
+    let sucursalesFiltro = req.query.sucursales;
+    if (typeof sucursalesFiltro === "string") sucursalesFiltro = sucursalesFiltro.split(",").filter(Boolean);
+    if (!Array.isArray(sucursalesFiltro) || !sucursalesFiltro.length) sucursalesFiltro = null;
+
     const [pedidos, quejas, reservaciones, cupones] = await Promise.all([
-      db.obtenerPedidosPorRango(desdeFecha, hastaFecha),
-      db.obtenerQuejasPorRango(desdeFecha, hastaFecha),
-      db.obtenerReservacionesPorRango(desdeFecha, hastaFecha),
+      db.obtenerPedidosPorRango(desdeFecha, hastaFecha, sucursalesFiltro),
+      db.obtenerQuejasPorRango(desdeFecha, hastaFecha, sucursalesFiltro),
+      db.obtenerReservacionesPorRango(desdeFecha, hastaFecha, sucursalesFiltro),
       db.obtenerCupones(),
     ]);
 
