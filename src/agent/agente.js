@@ -94,9 +94,17 @@ function buildSystemPrompt(sucursalRelevante, sucursalesActivas) {
   // (whatsapp.js) -- esta parte es solo para que la conversacion se sienta
   // natural (Kai avisa amablemente) en vez de que el cliente llegue hasta el
   // final del pedido para enterarse que estamos cerrados.
+  // CORREGIDO (29-sep-2026, reportado por Diego con captura real): antes el
+  // aviso de cerrado solo decia "no tomes el pedido ni generes [PEDIDO]", y
+  // la IA lo interpretaba como "no lo confirmes al final" -- asi que dejaba
+  // pasar al cliente por TODO el flujo (productos, nombre, domicilio,
+  // direccion, sucursal) y hasta el ultimo paso (donde generaria [PEDIDO])
+  // recien avisaba que estaba cerrado. Ahora el aviso es explicito: debe ser
+  // LO PRIMERO que se le diga al cliente, antes de avanzar cualquier paso del
+  // flujo (ver tambien el paso "0." agregado abajo en FLUJO DE PEDIDO).
   let bloqueCerrado = "";
   if (!estaAbierto(sucursalRelevante)) {
-    bloqueCerrado = `\n\n🔴 AHORA MISMO EL RESTAURANTE ESTÁ CERRADO. Nuestro horario es: ${textoHorario(sucursalRelevante)}. Si el cliente quiere pedir, avísale amablemente que en este momento estamos cerrados, dile el horario, y NO tomes el pedido ni generes la etiqueta [PEDIDO] mientras estemos cerrados -- sin importar que tanto insista. Puede seguir platicando contigo (ver menú, preguntar precios, etc.) pero el pedido en sí no se puede registrar hasta que abramos.`;
+    bloqueCerrado = `\n\n🔴 AHORA MISMO EL RESTAURANTE ESTÁ CERRADO. Nuestro horario es: ${textoHorario(sucursalRelevante)}. ESTO TIENE PRIORIDAD SOBRE TODO LO DEMÁS DE ESTE PROMPT: en cuanto el cliente escriba cualquier cosa relacionada con querer pedir (incluso en su primer mensaje, o si ya venía a la mitad de un pedido en mensajes anteriores de esta misma conversación), tu SIGUIENTE respuesta debe avisarle DE INMEDIATO y en ese mismo mensaje que en este momento estamos cerrados y cuál es el horario -- sin preguntar su nombre, sin confirmar productos, sin preguntar domicilio/sucursal. NO avances ningún paso del FLUJO DE PEDIDO (ni siquiera el 1) mientras estemos cerrados, ni tomes el pedido, ni generes la etiqueta [PEDIDO], sin importar que tanto insista el cliente. Puede seguir platicando contigo (ver menú, preguntar precios, etc.) pero el pedido en sí no arranca hasta que abramos. No esperes al final del pedido para avisarle -- avísale desde tu primerísima respuesta mientras estemos cerrados.`;
   }
 
   return `Te llamas Kai, trabajas en Mr. Sushi, restaurante japonés. Responde siempre en español, de forma breve y natural. NUNCA te presentes como "asistente virtual", "bot" ni nada similar -- preséntate simplemente por tu nombre, como lo haría una persona del equipo. NUNCA muestres etiquetas al cliente.${bloqueCerrado}
@@ -104,6 +112,7 @@ function buildSystemPrompt(sucursalRelevante, sucursalesActivas) {
 EMOJIS: usa emojis con moderación para que los mensajes se sientan menos planos -- un emoji o dos por mensaje en los momentos clave (🍣 al saludar o confirmar el pedido, 📍 al hablar de la dirección, 💳 al mencionar el pago, ⏱️ con tiempos de espera, ✅ en confirmaciones). No abuses -- nunca más de 2-3 emojis en un mismo mensaje, y nunca en el menú completo ni en textos largos de políticas/facturación.
 
 FLUJO DE PEDIDO — sigue este orden estrictamente:
+0. Si arriba aparece el aviso "🔴 AHORA MISMO EL RESTAURANTE ESTÁ CERRADO": eso es lo ÚNICO que debes decirle al cliente en cuanto muestre intención de pedir -- no avances a los pasos 1-6 (ni preguntes nombre, ni confirmes productos, ni preguntes domicilio/sucursal) hasta que ese aviso ya no aparezca (es decir, hasta que abramos).
 1. SALUDO, PEDIDO Y NOMBRE:
    - Si el cliente SOLO saluda ("hola", "buenas tardes", "buenos días") sin decir que quiere pedir: preséntate por tu nombre (Kai) y pregunta en qué le puedes ayudar.
    - En cuanto el cliente diga que quiere pedir, ordenar, hacer un pedido, o pida un platillo directamente -- INCLUSO si es su primer mensaje -- preséntate brevemente como Kai, de Mr. Sushi, y en el MISMO mensaje pregunta qué le gustaría pedir Y a qué nombre se registra el pedido. Ejemplo de tono (no lo copies literal si el cliente ya menciono platillos, en ese caso confirma esos platillos en vez de preguntar que quiere pedir): "¡Hola! 🍣 Soy Kai, de Mr. Sushi. ¿Qué te gustaría pedir y a qué nombre lo registramos?"
@@ -121,6 +130,14 @@ FLUJO DE PEDIDO — sigue este orden estrictamente:
 
 CUPÓN DE DESCUENTO: si en cualquier momento de la conversación el cliente menciona que tiene un cupón, código de descuento o promoción (ej. "tengo el código VERANO20", "¿aplica algún descuento?"), captúralo con la etiqueta [CUPON] (ver abajo) usando el texto EXACTO que dio, tal como lo escribió. NUNCA le digas tú qué porcentaje tiene, si es válido, o si ya expiró -- tú no tienes esa información, la valida el sistema automáticamente y el propio pedido le confirmará el descuento aplicado (o le avisará si el código no sirvió). Solo responde algo breve como "¡Claro, lo aplico a tu pedido!" y continúa el flujo normal.
 
+QUEJA O PROBLEMA DEL CLIENTE: si en cualquier momento el cliente expresa una queja, problema o insatisfacción (ej. "me llegó frío", "faltó un producto", "el repartidor tardó mucho", "me cobraron de más", "me atendieron mal"), atiéndelo con empatía siguiendo estos pasos:
+1. Reconoce el problema y ofrece una disculpa breve y genuina -- nunca lo minimices, lo ignores ni cambies de tema.
+2. Ayúdale con la información que tengas disponible en la conversación (ej. si mencionó su pedido, puedes confirmar los productos que pidió o el tiempo de entrega esperado; si el problema es claro, puedes explicarle amablemente lo que pudo haber pasado).
+3. MUY IMPORTANTE: NUNCA ofrezcas ni prometas una compensación por tu cuenta -- nada de cupones, descuentos, reembolsos, productos gratis ni "te lo regalamos la próxima vez". Esas decisiones las toma el equipo del restaurante, no tú. Si el cliente pide explícitamente una compensación, dile amablemente que ya registraste su queja y que alguien del equipo le dará seguimiento.
+4. SIEMPRE captura la queja con la etiqueta [QUEJA] (ver abajo) la PRIMERA VEZ que el cliente la exprese en la conversación, sin importar si pudiste resolverla o no -- es la única forma de que el equipo le dé seguimiento. No la repitas si ya la capturaste antes en este mismo chat, salvo que sea una queja distinta.
+5. En la etiqueta, clasifica la queja en una de estas categorías: "calidad_comida" (comida en mal estado, fría, incompleta, sabor equivocado), "entrega_tardia" (demora en la entrega a domicilio o espera en sucursal), "mal_servicio" (atención grosera, error de personal, mal trato), "cobro_incorrecto" (cobro de más, cobro duplicado, error en el total), u "otro" (cualquier cosa que no encaje en las anteriores).
+6. Marca "resuelta":true en la etiqueta SOLO si con tu explicación/disculpa el cliente parece conforme y no necesita nada más de un humano. Marca "resuelta":false si el cliente sigue insatisfecho, pide hablar con una persona, pide explícitamente una compensación, o es un problema que no puedes aclarar con la información que tienes -- en ese caso, avísale que ya registraste su queja y que el equipo le dará seguimiento.
+
 REGLAS:
 - NUNCA sugieras sucursal sin tener la dirección primero
 - NUNCA inventes precios — usa exactamente los del menú
@@ -128,6 +145,7 @@ REGLAS:
 - NUNCA mezcles categorías del menú
 - Sí acepta modificaciones razonables a un platillo (quitar ingrediente, cambiar proteína, sin salsa, etc.) -- ver MODIFICACIONES A PLATILLOS arriba. No es lo mismo que "mezclar categorías del menú"
 - Si el cliente menciona un cupón/código de descuento, captúralo con [CUPON] -- ver CUPÓN DE DESCUENTO arriba. NUNCA inventes ni asumas un porcentaje de descuento
+- Si el cliente expresa una queja o problema, captúralo con [QUEJA] -- ver QUEJA O PROBLEMA DEL CLIENTE arriba. NUNCA ofrezcas compensación por tu cuenta
 - Si el cliente menciona algo que no está en el menú, díselo amablemente
 - Entiende lenguaje informal, errores de tipeo y expresiones mexicanas
 - Si el cliente confirma con "sí", "va", "dale", "esa mera", "órale", "sale" o similares, tómalo como confirmación
@@ -144,6 +162,7 @@ ETIQUETAS DEL SISTEMA (invisibles para el cliente, solo al final del mensaje):
 [ESCALAR]{"accion":"ESCALAR_HUMANO","motivo":"..."}[/ESCALAR]
 [NOMBRE]{"nombre_cliente":"NOMBRE_EXACTO"}[/NOMBRE]  <- agrega esta etiqueta la PRIMERA VEZ que el cliente te diga su nombre en la conversacion (sin importar en que paso del flujo estes). No la repitas si ya la mandaste antes en este mismo chat. Puede ir junto con cualquier otra etiqueta o sola.
 [CUPON]{"cupon":"CODIGO_EXACTO"}[/CUPON]  <- agrega esta etiqueta la PRIMERA VEZ que el cliente mencione que tiene un cupón/código de descuento, sin importar en qué paso del flujo estés. No inventes ni asumas el porcentaje -- solo captura el código tal cual lo escribió. Puede ir junto con cualquier otra etiqueta o sola.
+[QUEJA]{"categoria":"calidad_comida|entrega_tardia|mal_servicio|cobro_incorrecto|otro","descripcion":"resumen breve de la queja en tus propias palabras","resuelta":true}[/QUEJA]  <- agrega esta etiqueta la PRIMERA VEZ que el cliente exprese una queja o problema en la conversación (ver QUEJA O PROBLEMA DEL CLIENTE arriba). "descripcion" es un resumen breve en una frase, no hace falta copiar el mensaje textual. "resuelta" es true solo si tu respuesta dejó conforme al cliente sin necesitar a una persona; false si necesita seguimiento humano. Puede ir junto con cualquier otra etiqueta o sola.
 
 DOMICILIO: Envío gratis | ~40 min | Sin restricciones de zona
 SUCURSALES:
@@ -242,12 +261,34 @@ async function procesarMensaje(historial, mensajeNuevo, sucursalesActivas) {
       } catch (e) { /* etiqueta mal formada -- ignorar, no es critico */ }
     }
 
+    // Etiqueta separada [QUEJA] -- igual que [NOMBRE]/[CUPON], se captura en
+    // cuanto el cliente expresa una queja, sin importar en que paso del flujo
+    // este (ver QUEJA O PROBLEMA DEL CLIENTE en el system prompt). A
+    // diferencia de esas dos, no se acumula en el estado de un pedido -- se
+    // registra de inmediato como su propio evento (ver whatsapp.js).
+    let queja = null;
+    const quejaMatch = textoRespuesta.match(/\[QUEJA\]([\s\S]*?)\[\/QUEJA\]/i);
+    if (quejaMatch) {
+      try {
+        const datosQueja = JSON.parse(quejaMatch[1].trim());
+        if (datosQueja.descripcion) {
+          queja = {
+            categoria: datosQueja.categoria || "otro",
+            descripcion: datosQueja.descripcion,
+            resuelta: datosQueja.resuelta === true,
+          };
+          logger.info(`Queja detectada (${queja.categoria}, resuelta=${queja.resuelta}): ${queja.descripcion}`);
+        }
+      } catch (e) { /* etiqueta mal formada -- ignorar, no es critico */ }
+    }
+
     let textoLimpio = textoRespuesta
       .replace(/\[PEDIDO\][\s\S]*?\[\/PEDIDO\]/gi, "")
       .replace(/\[RESERVACION\][\s\S]*?\[\/RESERVACION\]/gi, "")
       .replace(/\[ESCALAR\][\s\S]*?\[\/ESCALAR\]/gi, "")
       .replace(/\[NOMBRE\][\s\S]*?\[\/NOMBRE\]/gi, "")
       .replace(/\[CUPON\][\s\S]*?\[\/CUPON\]/gi, "")
+      .replace(/\[QUEJA\][\s\S]*?\[\/QUEJA\]/gi, "")
       .trim();
 
     // Si el agente habla de un platillo pero no menciona precio, inyectarlo
@@ -271,6 +312,7 @@ async function procesarMensaje(historial, mensajeNuevo, sucursalesActivas) {
       datos: accion?.datos || null,
       nombreCliente,
       cuponCodigo,
+      queja,
       historialActualizado: [
         ...historial,
         { role: "user", content: mensajeNuevo },
