@@ -91,6 +91,29 @@ function requireGerente(req, res, next) {
   next();
 }
 
+// Middleware: exige sesion valida Y rol gerente O administrativo -- para
+// reportes, que ambos pueden descargar (el administrativo solo ve/descarga
+// sus sucursales asignadas, forzado en el propio endpoint, no aqui).
+function requireReportes(req, res, next) {
+  const token = extraerToken(req);
+  const sesion = token && obtenerSesion(token);
+  if (!sesion) return res.status(401).json({ error: "Sesion invalida o expirada. Inicia sesion de nuevo." });
+  if (sesion.rol !== "gerente" && sesion.rol !== "administrativo")
+    return res.status(403).json({ error: "No tienes permiso para descargar reportes." });
+  req.sesion = sesion;
+  next();
+}
+
+// Middleware: bloquea al rol "administrativo" (solo ver/descargar) de
+// cualquier accion que modifique datos. Se usa DESPUES de requireAuth (que
+// ya dejo req.sesion listo) en las rutas que editan/crean pedidos, quejas,
+// reservaciones, etc.
+function bloquearSoloLectura(req, res, next) {
+  if (req.sesion?.rol === "administrativo")
+    return res.status(403).json({ error: "Tu usuario es de solo lectura." });
+  next();
+}
+
 // Limpieza periodica de sesiones vencidas (evita crecer memoria indefinidamente)
 setInterval(() => {
   const ahora = Date.now();
@@ -99,4 +122,4 @@ setInterval(() => {
   }
 }, 60 * 60 * 1000).unref();
 
-module.exports = { crearSesion, obtenerSesion, cerrarSesion, requireAuth, requireGerente, obtenerSesionesActivas };
+module.exports = { crearSesion, obtenerSesion, cerrarSesion, requireAuth, requireGerente, requireReportes, bloquearSoloLectura, obtenerSesionesActivas };
