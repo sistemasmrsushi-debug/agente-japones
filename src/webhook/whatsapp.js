@@ -252,6 +252,110 @@ async function reenviarLinkPago(pedido) {
   return { exito: false, error: resultadoPago.error };
 }
 
+// NUEVO (29-sep-2026, pedido por Diego): convierte un telefono capturado A
+// MANO por la sucursal (ej. "5511097561", "55 1109 7561", "+52 55 1109
+// 7561") al mismo formato que usa Twilio en los pedidos normales del bot
+// ("whatsapp:+52XXXXXXXXXX"). Sin esto, el webhook de confirmacion de pago
+// (ver webhook_netpay.js, evento "sessionLink.paid") no podria mandarle el
+// aviso de "pago confirmado" a este cliente -- ese webhook es el MISMO para
+// pedidos del bot y manuales, no distingue el origen.
+function normalizarTelefonoManual(telefonoCrudo) {
+  let digitos = String(telefonoCrudo || "").replace(/\D/g, "");
+  if (digitos.length === 10) digitos = "52" + digitos;
+  // Formato viejo de WhatsApp para celulares de Mexico (52 + 1 + 10 digitos,
+  // 13 digitos en total) -- por si alguien lo copia de una conversacion vieja.
+  else if (digitos.length === 13 && digitos.startsWith("521")) digitos = "52" + digitos.slice(3);
+  if (!/^52\d{10}$/.test(digitos)) return null;
+  return `whatsapp:+${digitos}`;
+}
+
+// NUEVO (29-sep-2026, pedido por Diego): permite que una sucursal registre
+// un pedido a domicilio que ELLA tomo directamente (llamada, cliente que
+// llego a preguntar, etc. -- no via la conversacion del bot) y genere su
+// link de pago de Netpay, sin que el bot le escriba nada al cliente para
+// avisarle/mandarle el link -- eso lo hace la sucursal por su cuenta, por
+// el medio que prefiera (el link se regresa en la respuesta de la API para
+// que el panel lo muestre con un boton de "copiar"). El pedido queda
+// guardado igual que cualquier otro (aparece en Pedidos, en Reportes, etc.)
+// con origen="manual_sucursal" para distinguirlo. La UNICA vez que el bot
+// SI le escribe a este cliente es cuando Netpay confirma que ya pago (ver
+// webhook_netpay.js) -- ese aviso es el mismo para todos los pedidos y
+// Diego pidio explicitamente conservarlo tambien para estos.
+async function crearPedidoManualYGenerarLink({ telefono, nombreCliente, sucursal, items, direccionTexto, referencias }) {
+  const telefonoFinal = normalizarTelefonoManual(telefono);
+  if (!telefonoFinal) {
+    return { exito: false, error: "El teléfono no es válido. Escríbelo a 10 dígitos (ej. 5511097561) o con +52." };
+  }
+
+  const itemsNormalizados = normalizarItemsPedido(items);
+  const totalBase = itemsNormalizados.reduce((s, i) => s + (i.precio * (i.cantidad || 1)), 0);
+  if (!itemsNormalizados.length || totalBase <= 0) {
+    return { exito: false, error: "Agrega al menos un platillo con precio válido." };
+  }
+
+  if (!direccionTexto || !direccionTexto.trim()) {
+    return { exito: false, error: "Escribe la dirección del cliente." };
+  }
+  const geo = await validarDireccion(direccionTexto.trim());
+
+  const pedido = {
+    id: `PED-${Date.now()}`,
+    fecha: new Date().toISOString(),
+    estado: "pendiente_pago",
+    telefono_cliente: telefonoFinal,
+    nombre_cliente: nombreCliente || null,
+    sucursal,
+    items: itemsNormalizados,
+    tipo: "domicilio",
+    direccion: geo.direccion,
+    colonia: geo.colonia || null,
+    municipio: geo.municipio || null,
+    estado_direccion: geo.estado || null,
+    codigo_postal: geo.codigoPostal || null,
+    referencias: referencias || null,
+    ubicacion_gps: geo.coords ? { latitude: geo.coords.lat, longitude: geo.coords.lng, maps_url: geo.maps_url || null } : null,
+    origen: "manual_sucursal",
+  };
+
+  await db.guardarPedido(pedido);
+  logger.info(`Pedido manual creado por sucursal (${pedido.sucursal}): ${pedido.id}`);
+
+  // Recordar esta direccion para el proximo pedido del mismo telefono, igual
+  // que ya se hace para los pedidos que toma el bot (ver tabla "clientes").
+  db.guardarClienteDireccion(telefonoFinal, {
+    nombre: pedido.nombre_cliente,
+    direccion: pedido.direccion,
+    colonia: pedido.colonia,
+    municipio: pedido.municipio,
+    estado_direccion: pedido.estado_direccion,
+    codigo_postal: pedido.codigo_postal,
+    lat: pedido.ubicacion_gps?.latitude || null,
+    lng: pedido.ubicacion_gps?.longitude || null,
+    maps_url: pedido.ubicacion_gps?.maps_url || null,
+  }).catch(e => logger.error("Error guardando direccion del cliente (pedido manual): " + e.message));
+
+  const facturacionRespaldo = await datosFacturacionConRespaldo(pedido);
+  const resultadoPago = await generarLinkPago({
+    items: itemsNormalizados,
+    referencia: pedido.id,
+    telefono: telefonoFinal,
+    nombreCliente: pedido.nombre_cliente,
+    direccion: pedido.direccion,
+    colonia: pedido.colonia,
+    municipio: facturacionRespaldo.municipio,
+    estadoDireccion: facturacionRespaldo.estadoDireccion,
+    codigoPostal: facturacionRespaldo.codigoPostal,
+  });
+
+  if (!resultadoPago.exito) {
+    logger.error(`Fallo generacion de link de pago (manual) para ${pedido.id}: ${resultadoPago.error}`);
+    notificarDueno(`🔴 Netpay falló al generar un link de pago manual.\n\nPedido: ${pedido.id}\nSucursal: ${pedido.sucursal}\nMotivo: ${resultadoPago.error}\n\nEl pedido ya quedó registrado en el dashboard -- intenta "Reenviar link" desde ahí.`);
+    return { exito: false, error: resultadoPago.error, pedidoId: pedido.id };
+  }
+
+  return { exito: true, pedidoId: pedido.id, linkPago: resultadoPago.linkPago, direccionResuelta: pedido.direccion };
+}
+
 // Decide la sucursal final que atendera un domicilio, respetando un radio maximo
 // de entrega. Mantiene el sistema de palabras clave (zonaSugerida) como primer
 // intento -- solo busca alternativas si esa sucursal queda demasiado lejos.
@@ -896,6 +1000,38 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
       logger.info(`Cupón guardado para ${telefono}: ${resultado.cuponCodigo}`);
     }
 
+    // NUEVO (23-sep-2026, pedido por Diego): quejas de clientes. El agente ya
+    // intento resolverla con la informacion que tenia (ver QUEJA O PROBLEMA
+    // DEL CLIENTE en agente.js), sin ofrecer compensacion por su cuenta --
+    // aqui solo se registra para que quede en el dashboard (pestaña Quejas).
+    // Se guarda un marcador en "estado" (igual que nombre_cliente/cupon) para
+    // no duplicar el registro si el modelo repite la misma etiqueta en el
+    // siguiente turno.
+    if (resultado.queja && resultado.queja.descripcion !== estado?.ultima_queja) {
+      estado = { ...(estado || {}), ultima_queja: resultado.queja.descripcion };
+      await db.guardarEstadoPedido(telefono, estado);
+
+      const pedidoReciente = await db.obtenerPedidoMasRecientePorTelefono(telefono).catch(() => null);
+      const nuevaQueja = {
+        id: `QJ-${Date.now()}`,
+        fecha: new Date().toISOString(),
+        telefono_cliente: telefono,
+        nombre_cliente: resultado.nombreCliente || estado?.nombre_cliente || null,
+        sucursal: pedidoReciente?.sucursal || null,
+        pedido_id: pedidoReciente?.id || null,
+        categoria: resultado.queja.categoria || "otro",
+        descripcion: resultado.queja.descripcion || null,
+        estado: resultado.queja.resuelta ? "resuelta" : "nueva",
+        resuelta_por: resultado.queja.resuelta ? "agente" : null,
+      };
+      await db.guardarQueja(nuevaQueja);
+      logger.info(`Queja registrada (${nuevaQueja.id}, ${nuevaQueja.estado}): ${nuevaQueja.categoria} -- ${nuevaQueja.descripcion}`);
+
+      if (!resultado.queja.resuelta) {
+        notificarDueno(`🟠 Un cliente tiene una queja que el agente no pudo resolver solo.\n\nCategoría: ${nuevaQueja.categoria}\nCliente: ${telefono.replace("whatsapp:", "")}${nuevaQueja.nombre_cliente ? ` (${nuevaQueja.nombre_cliente})` : ""}${nuevaQueja.sucursal ? `\nSucursal: ${nuevaQueja.sucursal}` : ""}\n\n"${nuevaQueja.descripcion}"\n\nYa quedó registrada en el dashboard (pestaña Quejas) -- dale seguimiento directo con el cliente.`);
+      }
+    }
+
     // Detectar si el agente esta pidiendo la direccion al cliente
     const textoBajo = resultado.texto.toLowerCase();
     const pidioDir = /direcci[oó]n|colonia|referencia/.test(textoBajo);
@@ -1231,3 +1367,7 @@ module.exports = router;
 // dashboard.js puede hacer `const { reenviarLinkPago } = require("../webhook/whatsapp")`
 // y reusar la misma logica de Netpay/facturacion para el boton "Reenviar link".
 module.exports.reenviarLinkPago = reenviarLinkPago;
+// NUEVO (29-sep-2026, pedido por Diego): panel "Generar link" del dashboard
+// -- pedidos que la sucursal toma a mano y para los que solo necesita un
+// link de pago, sin que el bot le escriba nada al cliente (ver dashboard.js).
+module.exports.crearPedidoManualYGenerarLink = crearPedidoManualYGenerarLink;

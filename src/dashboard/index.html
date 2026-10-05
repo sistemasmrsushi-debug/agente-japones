@@ -159,6 +159,7 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
   </div>
   <div class="tabs">
     <button class="tab active" id="tab-pedidos" onclick="cambiarTab('pedidos')">Pedidos</button>
+    <button class="tab" id="tab-linkmanual" onclick="cambiarTab('linkmanual')">Generar link</button>
     <button class="tab" id="tab-reservaciones" onclick="cambiarTab('reservaciones')">Reservaciones</button>
     <button class="tab" id="tab-quejas" onclick="cambiarTab('quejas')">Quejas</button>
     <button class="tab" id="tab-reportes" onclick="cambiarTab('reportes')" style="display:none">Reportes</button>
@@ -190,6 +191,42 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
           <thead><tr><th>ID / Hora</th><th>Cliente</th><th>Pedido</th><th>Sucursal</th><th>Tipo</th><th>Total</th><th>Estado</th><th>Acciones</th></tr></thead>
           <tbody id="tbody-pedidos"><tr><td colspan="8" class="vacio">Cargando...</td></tr></tbody>
         </table>
+      </div>
+    </div>
+    <div class="panel" id="panel-linkmanual">
+      <div class="conectividad-titulo" style="margin-bottom:0.8rem">
+        Registra un pedido a domicilio que tomaste directamente (llamada, cliente en mostrador, etc.) y genera su link de pago de Netpay. El bot no le escribe nada al cliente -- copia el link y mándaselo tú por donde prefieras. Solo recibirá un WhatsApp automático cuando Netpay confirme que ya pagó.
+      </div>
+      <div class="admin-form">
+        <select class="admin-input admin-input-sm" id="lm-sucursal" style="display:none"></select>
+        <input class="admin-input" id="lm-telefono" placeholder="Teléfono del cliente (10 dígitos)">
+        <input class="admin-input" id="lm-nombre" placeholder="Nombre del cliente (opcional)">
+      </div>
+      <div class="admin-form">
+        <input class="admin-input" id="lm-direccion" placeholder="Dirección completa (calle, número, colonia, ciudad)" style="flex:1;min-width:280px">
+        <input class="admin-input" id="lm-referencias" placeholder="Referencias (opcional)">
+      </div>
+      <div class="conectividad-titulo" style="margin-top:1rem">Platillos del pedido</div>
+      <div class="admin-form">
+        <select class="admin-input" id="lm-item-select"></select>
+        <input class="admin-input admin-input-sm" id="lm-item-cantidad" type="number" min="1" value="1" style="max-width:80px">
+        <button class="btn-guardar" onclick="agregarItemLinkManual()">+ Agregar platillo</button>
+      </div>
+      <div class="tabla-wrap" style="margin:0.8rem 0">
+        <table>
+          <thead><tr><th>Platillo</th><th>Cantidad</th><th>Precio</th><th></th></tr></thead>
+          <tbody id="lm-items-tbody"><tr><td colspan="4" class="vacio">Sin platillos agregados.</td></tr></tbody>
+        </table>
+      </div>
+      <div style="font-size:0.9rem;font-weight:600;margin-bottom:0.8rem">Total: $<span id="lm-total">0.00</span> MXN</div>
+      <button class="btn-guardar" onclick="generarLinkManual()">Generar link de pago</button>
+      <div class="admin-msg" id="lm-msg"></div>
+      <div id="lm-resultado" style="display:none;margin-top:1rem;padding:1rem;border:1px solid var(--borde);background:var(--gris1)">
+        <div style="font-size:0.65rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:0.5rem">✅ Link generado -- cópialo y mándaselo al cliente</div>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <input class="admin-input" id="lm-link-generado" readonly style="flex:1;font-family:'DM Mono',monospace;font-size:0.7rem">
+          <button class="btn-guardar" onclick="copiarLinkManual()">Copiar</button>
+        </div>
       </div>
     </div>
     <div class="panel" id="panel-reservaciones">
@@ -264,8 +301,8 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
         </div>
         <div class="tabla-wrap">
           <table>
-            <thead><tr><th>Categoría</th><th>Nombre</th><th>Precio</th><th>Descripción</th><th>Acciones</th></tr></thead>
-            <tbody id="tbody-admin-menu"><tr><td colspan="5" class="vacio">Cargando...</td></tr></tbody>
+            <thead><tr><th>Categoría</th><th>Nombre</th><th>Precio</th><th>Descripción</th><th>Activo</th><th>Acciones</th></tr></thead>
+            <tbody id="tbody-admin-menu"><tr><td colspan="6" class="vacio">Cargando...</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -337,6 +374,8 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
 <script>
 let sesion = null, todosLosPedidos = [], filtroActual = 'todos';
 let todasLasQuejas = [], filtroQuejasActual = 'todas';
+// Estado del panel "Generar link" (pedido manual por sucursal, ver mas abajo).
+let menuActivoCargado = false, menuItemsLinkManual = [], carritoLinkManual = [];
 setInterval(() => { document.getElementById('reloj').textContent = new Date().toLocaleString('es-MX',{weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'}); }, 1000);
 document.getElementById('inp-password').addEventListener('keydown', e => { if(e.key==='Enter') login(); });
 
@@ -381,6 +420,16 @@ async function login() {
     if (sesion.rol==='administrativo') {
       document.getElementById('tab-reservaciones').style.display='none';
       document.getElementById('tab-quejas').style.display='none';
+      // "Generar link" crea/edita pedidos -- el rol administrativo es de
+      // solo ver/descargar, asi que tampoco debe ver esta pestaña (el
+      // servidor tambien lo bloquea, ver bloquearSoloLectura en dashboard.js).
+      document.getElementById('tab-linkmanual').style.display='none';
+    }
+    // El selector de sucursal del panel "Generar link" solo hace falta para
+    // quien maneja mas de una (supervisor/gerente) -- el rol "sucursal" ya
+    // tiene la suya fija, no hay nada que elegir.
+    if (sesion.rol==='supervisor' || sesion.rol==='gerente') {
+      cargarLmSucursales();
     }
     if (sesion.rol==='gerente' || sesion.rol==='administrativo') {
       // Rango por default del reporte: del 1ro del mes actual a hoy, para
@@ -555,7 +604,7 @@ function filaP(p) {
     ? `<div style="font-size:0.62rem;color:var(--muted);margin-top:0.2rem">${partesUbicacion.join(' · ')}</div>`
     : '';
   return `<tr class="${urgente?'fila-urgente':''}">
-    <td><div style="font-size:0.6rem;color:var(--muted)">${p.id}</div><div style="font-size:0.65rem;color:${urgente?'var(--rojo)':'var(--muted)'}">${fechaCorta} · ${hora}${urgente?' ⚠ 5+ min':''}</div></td>
+    <td><div style="font-size:0.6rem;color:var(--muted)">${p.id}${p.origen==='manual_sucursal'?' <span style="color:var(--naranja);font-weight:600">· MANUAL</span>':''}</div><div style="font-size:0.65rem;color:${urgente?'var(--rojo)':'var(--muted)'}">${fechaCorta} · ${hora}${urgente?' ⚠ 5+ min':''}</div></td>
     <td>${p.nombre_cliente ? `<span style="font-weight:600">${p.nombre_cliente}</span> · ` : ''}${telLink}</td>
     <td>${items}${direccionHtml}</td>
     <td>${p.sucursal||'—'}</td>
@@ -732,6 +781,7 @@ function cambiarTab(tab) {
   if(tab==='gerente') cargarStats();
   if(tab==='admin') cambiarSubtabAdmin('menu');
   if(tab==='reportes') cargarReportesPanel();
+  if(tab==='linkmanual' && !menuActivoCargado) cargarMenuLinkManual();
 }
 
 let alarmaInterval = null;
@@ -883,14 +933,26 @@ function actualizarContadorMasivo() {
   contador.textContent = `${n} cambio${n===1?'':'s'} sin guardar`;
 }
 
+// CAMBIADO (26-sep-2026, pedido por Diego: "no me dejaria eliminar los
+// items, solo inactivar y para guardar un cambio que si lo verifique o
+// pregunte"): antes habia un boton "Eliminar" que -- aunque por dentro el
+// servidor ya solo desactivaba el platillo (nunca lo borraba de la base de
+// datos, ver eliminarItemMenu en database.js) -- no dejaba forma de
+// reactivarlo desde el panel, asi que en la practica se sentia como un
+// borrado permanente. Ahora se maneja igual que los cupones: una casilla
+// "Activo" que se guarda junto con los demas campos (se puede desmarcar Y
+// volver a marcar cuando quieras), y CUALQUIER guardado -- de un platillo o
+// de varios a la vez -- pide confirmacion antes de aplicarse.
 async function guardarCambiosMenu() {
   const ids = [...filasMenuModificadas];
+  if (!ids.length) return;
+  if (!confirm(`¿Guardar ${ids.length} cambio${ids.length===1?'':'s'} en el menú?`)) return;
   let exitosos = 0, fallidos = 0;
   for (const id of ids) {
     const fila = document.querySelector(`#tbody-admin-menu tr[data-id="${id}"]`);
     if (!fila) { filasMenuModificadas.delete(id); continue; }
     const campos = {};
-    fila.querySelectorAll('[data-campo]').forEach(inp => campos[inp.dataset.campo] = inp.value);
+    fila.querySelectorAll('[data-campo]').forEach(inp => campos[inp.dataset.campo] = inp.type==='checkbox' ? inp.checked : inp.value);
     campos.precio = Number(campos.precio);
     if (isNaN(campos.precio) || campos.precio < 0) { fallidos++; continue; }
     try {
@@ -898,6 +960,7 @@ async function guardarCambiosMenu() {
       if (r.ok) {
         fila.classList.remove('fila-modificada');
         filasMenuModificadas.delete(id);
+        fila.style.opacity = campos.activo === false ? '0.45' : '';
         exitosos++;
       } else fallidos++;
     } catch { fallidos++; }
@@ -905,6 +968,9 @@ async function guardarCambiosMenu() {
   actualizarContadorMasivo();
   if (fallidos === 0) mostrarMsg('am-msg', `${exitosos} platillo${exitosos===1?'':'s'} actualizado${exitosos===1?'':'s'} correctamente.`, true);
   else mostrarMsg('am-msg', `${exitosos} guardado(s), ${fallidos} con error (revisa que el precio sea válido).`, false);
+  // Nota: a proposito NO se recarga toda la tabla aqui (igual que en
+  // guardarItemMenu) -- si algo fallo, recargar borraria el valor que el
+  // usuario ya habia escrito antes de poder corregirlo y reintentar.
 }
 
 function renderAdminMenu(items) {
@@ -912,26 +978,28 @@ function renderAdminMenu(items) {
   actualizarContadorMasivo();
   const tbody = document.getElementById('tbody-admin-menu');
   tbody.innerHTML = items.length ? items.map(i => `
-    <tr data-id="${i.id}">
+    <tr data-id="${i.id}" style="${i.activo === false ? 'opacity:0.45' : ''}">
       <td class="celda-input"><input class="admin-input-edit" value="${i.categoria}" data-campo="categoria" oninput="marcarFilaModificada(this)"></td>
       <td class="celda-input"><input class="admin-input-edit" value="${(i.nombre||'').replace(/"/g,'&quot;')}" data-campo="nombre" oninput="marcarFilaModificada(this)"></td>
       <td class="celda-input" style="max-width:100px"><input class="admin-input-edit" type="number" step="0.01" min="0" value="${i.precio}" data-campo="precio" oninput="marcarFilaModificada(this)"></td>
       <td class="celda-input"><input class="admin-input-edit" value="${(i.descripcion||'').replace(/"/g,'&quot;')}" data-campo="descripcion" oninput="marcarFilaModificada(this)"></td>
+      <td style="text-align:center"><input type="checkbox" data-campo="activo" ${i.activo !== false ? 'checked' : ''} onchange="marcarFilaModificada(this)" title="Si se desmarca, el agente de IA deja de ofrecer este platillo (no se borra, se puede reactivar cuando quieras)"></td>
       <td>
         <div class="acciones">
           <button class="btn-accion azul" onclick="guardarItemMenu(${i.id}, this)">Guardar</button>
-          <button class="btn-accion rojo" onclick="eliminarItemMenuUI(${i.id})">Eliminar</button>
         </div>
       </td>
-    </tr>`).join('') : '<tr><td colspan="5" class="vacio">Sin platillos registrados.</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="6" class="vacio">Sin platillos registrados.</td></tr>';
 }
 
 async function guardarItemMenu(id, btn) {
   const fila = btn.closest('tr');
   const campos = {};
-  fila.querySelectorAll('[data-campo]').forEach(inp => campos[inp.dataset.campo] = inp.value);
+  fila.querySelectorAll('[data-campo]').forEach(inp => campos[inp.dataset.campo] = inp.type==='checkbox' ? inp.checked : inp.value);
   campos.precio = Number(campos.precio);
   if (isNaN(campos.precio) || campos.precio < 0) return mostrarMsg('am-msg', 'El precio debe ser un número válido.', false);
+  const advertenciaInactivo = campos.activo === false ? '\n\n⚠️ Quedará INACTIVO: el agente de IA dejará de ofrecerlo a los clientes (lo puedes reactivar cuando quieras).' : '';
+  if (!confirm(`¿Guardar los cambios en "${campos.nombre}"?\n\nCategoría: ${campos.categoria}\nPrecio: $${campos.precio}${advertenciaInactivo}`)) return;
   try {
     const r = await fetchAuth(`/api/admin/menu/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(campos) });
     const data = await r.json();
@@ -939,18 +1007,10 @@ async function guardarItemMenu(id, btn) {
     fila.classList.remove('fila-modificada');
     filasMenuModificadas.delete(String(id));
     actualizarContadorMasivo();
+    fila.style.opacity = data.activo === false ? '0.45' : '';
     mostrarMsg('am-msg', `"${campos.nombre}" actualizado.`, true);
     // Nota: ya NO se recarga toda la tabla aqui -- eso borraria cambios sin
     // guardar que el usuario pudiera tener en otras filas al mismo tiempo.
-  } catch { mostrarMsg('am-msg', 'Error de conexión.', false); }
-}
-
-async function eliminarItemMenuUI(id) {
-  if (!confirm('¿Quitar este platillo del menú? El agente de IA dejará de ofrecerlo.')) return;
-  try {
-    await fetchAuth(`/api/admin/menu/${id}`, { method:'DELETE' });
-    mostrarMsg('am-msg', 'Platillo eliminado.', true);
-    cargarAdminMenu();
   } catch { mostrarMsg('am-msg', 'Error de conexión.', false); }
 }
 
@@ -1246,6 +1306,117 @@ function cambiarRolNuevoUsuario() {
   const necesitaSucursales = rol === 'supervisor' || rol === 'administrativo';
   document.getElementById('au-sucursales-wrap').style.display = necesitaSucursales ? 'flex' : 'none';
   document.getElementById('au-sucursales-titulo').textContent = rol === 'administrativo' ? 'Sucursales que puede ver:' : 'Sucursales del supervisor:';
+}
+
+// ---------- PANEL "GENERAR LINK": pedido manual por sucursal ----------
+// NUEVO (29-sep-2026, pedido por Diego): una sucursal toma un pedido a
+// domicilio por su cuenta (llamada, cliente que llega a preguntar, etc. --
+// no por la conversacion del bot) y solo necesita generar un link de pago
+// de Netpay para mandarselo ella misma al cliente. Ver POST /api/pedidos/manual
+// en dashboard.js y crearPedidoManualYGenerarLink en whatsapp.js.
+
+async function cargarLmSucursales() {
+  try {
+    const todas = await (await fetchAuth('/api/sucursales-nombres')).json();
+    // Un supervisor solo puede generar links para SUS sucursales asignadas;
+    // el gerente puede elegir cualquiera.
+    const disponibles = sesion.rol === 'supervisor'
+      ? todas.filter(s => (sesion.sucursales||[]).includes(s.nombre))
+      : todas;
+    const select = document.getElementById('lm-sucursal');
+    select.innerHTML = disponibles.map(s => `<option value="${s.nombre}">${s.nombre}</option>`).join('');
+    select.style.display = '';
+  } catch {}
+}
+
+async function cargarMenuLinkManual() {
+  try {
+    menuItemsLinkManual = await (await fetchAuth('/api/menu-activo')).json();
+    document.getElementById('lm-item-select').innerHTML = menuItemsLinkManual
+      .map((i, idx) => `<option value="${idx}">${i.nombre} — $${i.precio}</option>`).join('');
+    menuActivoCargado = true;
+  } catch {
+    document.getElementById('lm-msg').textContent = 'No se pudo cargar el menú. Intenta actualizar la página.';
+  }
+}
+
+function agregarItemLinkManual() {
+  const idx = Number(document.getElementById('lm-item-select').value);
+  const cantidad = Math.max(1, parseInt(document.getElementById('lm-item-cantidad').value, 10) || 1);
+  const item = menuItemsLinkManual[idx];
+  if (!item) return;
+  const existente = carritoLinkManual.find(i => i.nombre === item.nombre);
+  if (existente) existente.cantidad += cantidad;
+  else carritoLinkManual.push({ nombre: item.nombre, precio: Number(item.precio), cantidad });
+  document.getElementById('lm-item-cantidad').value = 1;
+  renderCarritoLinkManual();
+}
+
+function quitarItemLinkManual(idx) {
+  carritoLinkManual.splice(idx, 1);
+  renderCarritoLinkManual();
+}
+
+function renderCarritoLinkManual() {
+  const tbody = document.getElementById('lm-items-tbody');
+  tbody.innerHTML = carritoLinkManual.length ? carritoLinkManual.map((i, idx) => `
+    <tr>
+      <td>${i.nombre}</td>
+      <td>${i.cantidad}</td>
+      <td>$${(i.precio * i.cantidad).toFixed(2)}</td>
+      <td><button class="btn-accion rojo" onclick="quitarItemLinkManual(${idx})">Quitar</button></td>
+    </tr>`).join('') : '<tr><td colspan="4" class="vacio">Sin platillos agregados.</td></tr>';
+  const total = carritoLinkManual.reduce((s, i) => s + i.precio * i.cantidad, 0);
+  document.getElementById('lm-total').textContent = total.toFixed(2);
+}
+
+async function copiarLinkManual() {
+  const input = document.getElementById('lm-link-generado');
+  try {
+    await navigator.clipboard.writeText(input.value);
+    mostrarMsg('lm-msg', '¡Link copiado!', true);
+  } catch {
+    input.select();
+    document.execCommand('copy');
+  }
+}
+
+async function generarLinkManual() {
+  const telefono = document.getElementById('lm-telefono').value.trim();
+  const nombreCliente = document.getElementById('lm-nombre').value.trim();
+  const direccion = document.getElementById('lm-direccion').value.trim();
+  const referencias = document.getElementById('lm-referencias').value.trim();
+  const sucursal = (sesion.rol === 'supervisor' || sesion.rol === 'gerente')
+    ? document.getElementById('lm-sucursal').value : undefined;
+
+  if (!telefono) return mostrarMsg('lm-msg', 'Escribe el teléfono del cliente.', false);
+  if (!direccion) return mostrarMsg('lm-msg', 'Escribe la dirección del cliente.', false);
+  if (!carritoLinkManual.length) return mostrarMsg('lm-msg', 'Agrega al menos un platillo.', false);
+
+  mostrarMsg('lm-msg', 'Generando link...', true);
+  document.getElementById('lm-resultado').style.display = 'none';
+  try {
+    const body = { telefono, nombreCliente, direccion, referencias, items: carritoLinkManual };
+    if (sucursal) body.sucursal = sucursal;
+    const r = await fetchAuth('/api/pedidos/manual', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+    const data = await r.json();
+    if (!r.ok) return mostrarMsg('lm-msg', data.error || 'No se pudo generar el link.', false);
+
+    document.getElementById('lm-msg').textContent = '';
+    document.getElementById('lm-link-generado').value = data.linkPago;
+    document.getElementById('lm-resultado').style.display = 'block';
+    // Limpiar el formulario para el siguiente pedido, sin perder de vista el
+    // link recien generado (se queda visible hasta que se genere otro).
+    document.getElementById('lm-telefono').value = '';
+    document.getElementById('lm-nombre').value = '';
+    document.getElementById('lm-direccion').value = '';
+    document.getElementById('lm-referencias').value = '';
+    carritoLinkManual = [];
+    renderCarritoLinkManual();
+    cargarDatos(); // para que el pedido ya aparezca en la pestaña Pedidos
+  } catch {
+    mostrarMsg('lm-msg', 'Error de conexión.', false);
+  }
 }
 
 async function cargarAuSucursalesChecklist() {

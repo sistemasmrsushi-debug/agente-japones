@@ -5,7 +5,7 @@ const path = require("path");
 const bcrypt = require("bcryptjs");
 const logger = require("../utils/logger");
 const db = require("../db/database");
-const { crearSesion, cerrarSesion, requireAuth, requireGerente, obtenerSesionesActivas } = require("./auth");
+const { crearSesion, cerrarSesion, requireAuth, requireGerente, requireReportes, bloquearSoloLectura, obtenerSesionesActivas } = require("./auth");
 // CORREGIDO (26-ago-2026, reportado por Diego en una prueba real): el
 // despacho a Uber Direct se movio aqui desde webhook_netpay.js -- antes se
 // disparaba en cuanto se confirmaba el pago, sin esperar a que la cocina
@@ -18,7 +18,7 @@ const { notificarDueno } = require("../utils/alertas");
 // escribia "ya pague"/"reintentar" por WhatsApp (ver reenviarLinkPago en
 // whatsapp.js), para que Diego pueda mandarle un link nuevo al cliente
 // desde el dashboard cuando le llega la alerta de que fallo Netpay.
-const { reenviarLinkPago } = require("../webhook/whatsapp");
+const { reenviarLinkPago, crearPedidoManualYGenerarLink } = require("../webhook/whatsapp");
 // NUEVO (25-sep-2026, pedido por Diego): reporte financiero/operativo
 // descargable en Excel (ventas, cupones/descuentos, quejas, reservaciones).
 const { generarReporteExcel } = require("../utils/reportes");
@@ -90,10 +90,91 @@ router.get("/api/pedidos", requireAuth, async (req, res) => {
   }
 });
 
+// NUEVO (26-sep-2026, pedido por Diego): lista simple de nombres de
+// sucursales para cualquier usuario logueado (no solo gerente) -- la usa el
+// selector de sucursal al crear un usuario y el panel de Reportes para el
+// rol "administrativo". A proposito solo regresa el nombre, no telefono ni
+// horario ni nada mas sensible (eso sigue siendo solo para /api/admin/*).
+router.get("/api/sucursales-nombres", requireAuth, async (req, res) => {
+  try {
+    const sucursales = await db.obtenerSucursales();
+    res.json(sucursales.map(s => ({ nombre: s.nombre })));
+  } catch (err) {
+    logger.error("Error obteniendo nombres de sucursales: " + err.message);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
 // NUEVO (23-sep-2026, pedido por Diego): seguimiento de quejas de clientes.
 // El agente de IA ya las captura solas en la conversacion de WhatsApp (ver
 // QUEJA O PROBLEMA DEL CLIENTE en agente.js) -- aqui solo se listan para que
 // el dashboard las muestre, filtradas por sucursal igual que los pedidos.
+// NUEVO (29-sep-2026, pedido por Diego): lista de platillos activos (id,
+// categoria, nombre, precio) para el selector del panel "Generar link" --
+// cualquier rol con acceso de escritura a pedidos la puede consultar (no
+// solo gerente), a diferencia de /api/admin/menu que trae TODO (activos e
+// inactivos) y es solo para la pestaña de Administracion.
+router.get("/api/menu-activo", requireAuth, async (req, res) => {
+  try {
+    const items = await db.obtenerMenu();
+    res.json(items.map(i => ({ id: i.id, categoria: i.categoria, nombre: i.nombre, precio: i.precio })));
+  } catch (err) {
+    logger.error("Error obteniendo menu activo: " + err.message);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// NUEVO (29-sep-2026, pedido por Diego): "Generar link" -- una sucursal toma
+// un pedido a domicilio por su cuenta (llamada, cliente que llega a
+// preguntar, etc., NO por la conversacion del bot de WhatsApp) y solo
+// necesita un link de pago de Netpay para mandarselo ella misma al cliente
+// por el medio que prefiera. El bot NO le escribe nada al cliente aqui --
+// ver crearPedidoManualYGenerarLink en whatsapp.js para el detalle de que
+// SI se le sigue avisando automaticamente (la confirmacion de pago, cuando
+// Netpay avisa que ya se cobró).
+router.post("/api/pedidos/manual", requireAuth, bloquearSoloLectura, async (req, res) => {
+  try {
+    const { rol, sucursal, sucursales } = req.sesion;
+    const { telefono, nombreCliente, items, direccion, referencias } = req.body;
+    let sucursalDestino = req.body.sucursal;
+
+    // La sucursal destino SIEMPRE se resuelve desde la sesion, nunca se
+    // confia en lo que mande el cliente (ver bloquearSoloLectura -- mismo
+    // principio de no ampliar el alcance de un usuario editando el request).
+    if (rol === "sucursal") {
+      sucursalDestino = sucursal;
+    } else if (rol === "supervisor") {
+      if (!sucursalDestino || !Array.isArray(sucursales) || !sucursales.includes(sucursalDestino)) {
+        return res.status(400).json({ error: "Elige una de tus sucursales asignadas." });
+      }
+    } else if (rol === "gerente") {
+      if (!sucursalDestino) return res.status(400).json({ error: "Elige una sucursal." });
+    } else {
+      // administrativo ya quedo bloqueado arriba (bloquearSoloLectura), pero
+      // por si aparece un rol nuevo en el futuro, no se deja pasar por default.
+      return res.status(403).json({ error: "Tu rol no puede generar links de pago manuales." });
+    }
+
+    if (!Array.isArray(items) || !items.length) {
+      return res.status(400).json({ error: "Agrega al menos un platillo." });
+    }
+
+    const resultado = await crearPedidoManualYGenerarLink({
+      telefono, nombreCliente, sucursal: sucursalDestino, items,
+      direccionTexto: direccion, referencias,
+    });
+
+    if (resultado.exito) {
+      res.json({ ok: true, pedidoId: resultado.pedidoId, linkPago: resultado.linkPago, direccion: resultado.direccionResuelta });
+    } else {
+      res.status(400).json({ error: resultado.error, pedidoId: resultado.pedidoId || null });
+    }
+  } catch (err) {
+    logger.error("Error creando pedido manual: " + err.message);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
 router.get("/api/quejas", requireAuth, async (req, res) => {
   try {
     const { rol, sucursal, sucursales } = req.sesion;
@@ -109,7 +190,7 @@ router.get("/api/quejas", requireAuth, async (req, res) => {
 // resolver solo (las que ya llegaron con estado "nueva" y dispararon la
 // alerta a Diego). No hay endpoint para "reabrir" por ahora -- si hace
 // falta, se agrega despues.
-router.patch("/api/quejas/:id/resuelta", requireAuth, async (req, res) => {
+router.patch("/api/quejas/:id/resuelta", requireAuth, bloquearSoloLectura, async (req, res) => {
   try {
     const { id } = req.params;
     const queja = await db.marcarQuejaResuelta(id);
@@ -132,7 +213,7 @@ router.get("/api/reservaciones", requireAuth, async (req, res) => {
   }
 });
 
-router.patch("/api/pedidos/:id/estado", requireAuth, async (req, res) => {
+router.patch("/api/pedidos/:id/estado", requireAuth, bloquearSoloLectura, async (req, res) => {
   try {
     const { id } = req.params;
     const { estado } = req.body;
@@ -170,7 +251,7 @@ router.patch("/api/pedidos/:id/estado", requireAuth, async (req, res) => {
 // del cliente fue rechazada o Netpay fallo al generar el link la primera
 // vez). Solo aplica a pedidos a domicilio que sigan esperando pago -- para
 // cualquier otro estado/tipo no tiene sentido generar un link nuevo.
-router.post("/api/pedidos/:id/reenviar-link", requireAuth, async (req, res) => {
+router.post("/api/pedidos/:id/reenviar-link", requireAuth, bloquearSoloLectura, async (req, res) => {
   try {
     const { id } = req.params;
     const pedido = await db.obtenerPedidoPorId(id);
@@ -190,7 +271,7 @@ router.post("/api/pedidos/:id/reenviar-link", requireAuth, async (req, res) => {
   }
 });
 
-router.patch("/api/reservaciones/:id/estado", requireAuth, async (req, res) => {
+router.patch("/api/reservaciones/:id/estado", requireAuth, bloquearSoloLectura, async (req, res) => {
   try {
     const { id } = req.params;
     const { estado } = req.body;
@@ -230,7 +311,7 @@ router.get("/api/sesiones-activas", requireGerente, (req, res) => {
 // por header) porque el navegador dispara esto como una descarga normal,
 // no como un fetch -- ver requireGerente/extraerToken en auth.js, que ya
 // acepta el token de las dos formas.
-router.get("/api/reportes/excel", requireGerente, async (req, res) => {
+router.get("/api/reportes/excel", requireReportes, async (req, res) => {
   try {
     const { desde, hasta } = req.query;
     if (!desde || !hasta) return res.status(400).json({ error: "Faltan las fechas 'desde' y 'hasta'" });
@@ -253,6 +334,18 @@ router.get("/api/reportes/excel", requireGerente, async (req, res) => {
     let sucursalesFiltro = req.query.sucursales;
     if (typeof sucursalesFiltro === "string") sucursalesFiltro = sucursalesFiltro.split(",").filter(Boolean);
     if (!Array.isArray(sucursalesFiltro) || !sucursalesFiltro.length) sucursalesFiltro = null;
+
+    // NUEVO (26-sep-2026, pedido por Diego): rol "administrativo" -- SIEMPRE
+    // se fuerza al reporte a sus sucursales asignadas, sin importar que
+    // mande en el query param (para que no pueda ampliar su alcance
+    // editando la URL a mano). Si por algun motivo no tiene ninguna
+    // asignada, se rechaza en vez de caer sin querer al "todas" que produce
+    // un sucursalesFiltro vacio/null.
+    if (req.sesion.rol === "administrativo") {
+      if (!Array.isArray(req.sesion.sucursales) || !req.sesion.sucursales.length)
+        return res.status(403).json({ error: "Tu usuario no tiene sucursales asignadas -- pide al gerente que te asigne al menos una." });
+      sucursalesFiltro = req.sesion.sucursales;
+    }
 
     const [pedidos, quejas, reservaciones, cupones] = await Promise.all([
       db.obtenerPedidosPorRango(desdeFecha, hastaFecha, sucursalesFiltro),

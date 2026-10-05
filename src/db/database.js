@@ -67,6 +67,13 @@ async function initDB() {
     await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cupon_codigo TEXT;`);
     await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS descuento_porcentaje NUMERIC(5,2);`);
     await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS descuento_monto NUMERIC(10,2);`);
+    // NUEVO (29-sep-2026, pedido por Diego): pedidos que una sucursal registra
+    // a mano (cliente que llamo o llego directo, no via el bot de WhatsApp) y
+    // para los que solo se genera un link de pago de Netpay -- "bot" (default)
+    // sigue siendo el 99% de los pedidos, los que sí paso por la conversacion
+    // de WhatsApp con la IA. Sirve para distinguirlos en el dashboard y en los
+    // reportes, sin cambiar nada del comportamiento de los pedidos existentes.
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen TEXT DEFAULT 'bot';`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS reservaciones (
         id TEXT PRIMARY KEY,
@@ -226,8 +233,8 @@ async function initDB() {
 
 async function guardarPedido(pedido) {
   await pool.query(`
-    INSERT INTO pedidos (id, fecha, estado, telefono_cliente, nombre_cliente, sucursal, items, tipo, direccion, colonia, municipio, estado_direccion, codigo_postal, referencias, ubicacion_gps, cupon_codigo, descuento_porcentaje, descuento_monto)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+    INSERT INTO pedidos (id, fecha, estado, telefono_cliente, nombre_cliente, sucursal, items, tipo, direccion, colonia, municipio, estado_direccion, codigo_postal, referencias, ubicacion_gps, cupon_codigo, descuento_porcentaje, descuento_monto, origen)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
     ON CONFLICT (id) DO UPDATE SET
       estado = EXCLUDED.estado,
       nombre_cliente = COALESCE(EXCLUDED.nombre_cliente, pedidos.nombre_cliente),
@@ -247,6 +254,10 @@ async function guardarPedido(pedido) {
     pedido.cupon_codigo || null,
     pedido.descuento_porcentaje || null,
     pedido.descuento_monto || null,
+    // "bot" (default) para todo lo que ya existia -- "manual_sucursal" solo
+    // para los que se crean desde el nuevo panel de "Generar link" (ver
+    // crearPedidoManualYGenerarLink en whatsapp.js).
+    pedido.origen || "bot",
   ]);
 }
 
