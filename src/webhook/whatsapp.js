@@ -272,15 +272,14 @@ function normalizarTelefonoManual(telefonoCrudo) {
 // NUEVO (29-sep-2026, pedido por Diego): permite que una sucursal registre
 // un pedido a domicilio que ELLA tomo directamente (llamada, cliente que
 // llego a preguntar, etc. -- no via la conversacion del bot) y genere su
-// link de pago de Netpay, sin que el bot le escriba nada al cliente para
-// avisarle/mandarle el link -- eso lo hace la sucursal por su cuenta, por
-// el medio que prefiera (el link se regresa en la respuesta de la API para
-// que el panel lo muestre con un boton de "copiar"). El pedido queda
-// guardado igual que cualquier otro (aparece en Pedidos, en Reportes, etc.)
-// con origen="manual_sucursal" para distinguirlo. La UNICA vez que el bot
-// SI le escribe a este cliente es cuando Netpay confirma que ya pago (ver
-// webhook_netpay.js) -- ese aviso es el mismo para todos los pedidos y
-// Diego pidio explicitamente conservarlo tambien para estos.
+// link de pago de Netpay.
+// CORREGIDO (05-oct-2026, pedido por Diego): al probarlo, pidio que el link
+// SI se le mande automatico al cliente por WhatsApp en cuanto se genera
+// (como ya hace el bot para domicilio normal), en vez de solo mostrarlo en
+// el panel para copiar -- se quita esa diferencia. El pedido queda guardado
+// igual que cualquier otro (aparece en Pedidos, en Reportes, etc.) con
+// origen="manual_sucursal" para distinguirlo de los que si paso por la
+// conversacion del bot.
 async function crearPedidoManualYGenerarLink({ telefono, nombreCliente, sucursal, items, direccionTexto, referencias }) {
   const telefonoFinal = normalizarTelefonoManual(telefono);
   if (!telefonoFinal) {
@@ -296,7 +295,14 @@ async function crearPedidoManualYGenerarLink({ telefono, nombreCliente, sucursal
   if (!direccionTexto || !direccionTexto.trim()) {
     return { exito: false, error: "Escribe la dirección del cliente." };
   }
+  // Misma validacion contra Google Maps que usa el bot (ver validarDireccion
+  // en geocoding.js) -- si Google no reconoce la direccion, se rechaza aqui
+  // mismo para que la sucursal la corrija, en vez de registrar un pedido con
+  // una direccion que no existe o esta mal escrita.
   const geo = await validarDireccion(direccionTexto.trim());
+  if (!geo.valida) {
+    return { exito: false, error: "No encontramos esa dirección. Verifica calle, número, colonia y municipio, e intenta de nuevo." };
+  }
 
   const pedido = {
     id: `PED-${Date.now()}`,
@@ -352,6 +358,40 @@ async function crearPedidoManualYGenerarLink({ telefono, nombreCliente, sucursal
     notificarDueno(`🔴 Netpay falló al generar un link de pago manual.\n\nPedido: ${pedido.id}\nSucursal: ${pedido.sucursal}\nMotivo: ${resultadoPago.error}\n\nEl pedido ya quedó registrado en el dashboard -- intenta "Reenviar link" desde ahí.`);
     return { exito: false, error: resultadoPago.error, pedidoId: pedido.id };
   }
+
+  // Se le manda el link al cliente por WhatsApp (del numero del negocio),
+  // igual que a un pedido a domicilio tomado por el bot -- el pedido se
+  // queda en "pendiente_pago" y la cocina NO puede aceptarlo/prepararlo
+  // hasta que Netpay confirme el pago (ver webhook_netpay.js -> marcarPedidoPagado
+  // -> pasa a "pendiente", que es cuando aparece el boton "Aceptar pedido").
+  const itemsTexto = itemsNormalizados.map(formatearItemTexto).join("\n");
+  await enviarMensaje(telefonoFinal,
+    `🍣 ¡Tu pedido está listo para confirmar!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\nTotal: $${totalBase}\nSucursal: ${pedido.sucursal}\nDirección: ${pedido.direccion}\n\n💳 Para confirmar tu pedido realiza tu pago aquí:\n${resultadoPago.linkPago}\n\n⏱️ Tienes 15 minutos para completar el pago.`
+  );
+  logger.info(`Link de pago manual enviado por WhatsApp a ${telefonoFinal} para ${pedido.id}`);
+
+  // Mismo recordatorio y auto-cancelacion a los 15 min que usan los pedidos
+  // a domicilio del bot (ver crearPedidoDomicilioYPedirPago) -- si nadie en
+  // la sucursal le hace seguimiento aparte, el pedido no se queda "flotando"
+  // en pendiente_pago para siempre.
+  setTimeout(async () => {
+    const pedidoActual = (await db.obtenerPedidos(null, "gerente")).find(p => p.id === pedido.id);
+    if (pedidoActual && pedidoActual.estado === "pendiente_pago") {
+      await enviarMensaje(telefonoFinal,
+        `⏱️ Recordatorio: tu pedido ${pedido.id} sigue esperando confirmación de pago. Tienes 5 minutos más antes de que se cancele.\n\n${resultadoPago.linkPago}`
+      );
+    }
+  }, 10 * 60 * 1000);
+  setTimeout(async () => {
+    const pedidoActual = (await db.obtenerPedidos(null, "gerente")).find(p => p.id === pedido.id);
+    if (pedidoActual && pedidoActual.estado === "pendiente_pago") {
+      await db.actualizarEstadoPedido(pedido.id, "cancelado");
+      await enviarMensaje(telefonoFinal,
+        `Tu pedido ${pedido.id} fue cancelado por falta de pago. Si quieres intentar de nuevo, ¡contáctanos! 🍣`
+      );
+      logger.info(`Pedido manual ${pedido.id} cancelado automaticamente por falta de pago`);
+    }
+  }, 15 * 60 * 1000);
 
   return { exito: true, pedidoId: pedido.id, linkPago: resultadoPago.linkPago, direccionResuelta: pedido.direccion };
 }
@@ -1367,7 +1407,8 @@ module.exports = router;
 // dashboard.js puede hacer `const { reenviarLinkPago } = require("../webhook/whatsapp")`
 // y reusar la misma logica de Netpay/facturacion para el boton "Reenviar link".
 module.exports.reenviarLinkPago = reenviarLinkPago;
-// NUEVO (29-sep-2026, pedido por Diego): panel "Generar link" del dashboard
-// -- pedidos que la sucursal toma a mano y para los que solo necesita un
-// link de pago, sin que el bot le escriba nada al cliente (ver dashboard.js).
+// NUEVO (29-sep-2026, pedido por Diego): panel "Domicilio" del dashboard --
+// pedidos que la sucursal toma a mano (telefono, mostrador) y para los que
+// se genera Y manda el link de pago por WhatsApp automaticamente (ver
+// dashboard.js).
 module.exports.crearPedidoManualYGenerarLink = crearPedidoManualYGenerarLink;

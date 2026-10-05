@@ -195,7 +195,7 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
     </div>
     <div class="panel" id="panel-linkmanual">
       <div class="conectividad-titulo" style="margin-bottom:0.8rem">
-        Registra un pedido a domicilio que tomaste directamente (llamada, cliente en mostrador, etc.) y genera su link de pago de Netpay. El bot no le escribe nada al cliente -- copia el link y mándaselo tú por donde prefieras. Solo recibirá un WhatsApp automático cuando Netpay confirme que ya pagó.
+        Registra un pedido a domicilio que tomaste directamente (llamada, cliente en mostrador, etc.). Al generar el link, el sistema se lo manda automáticamente al cliente por WhatsApp (desde el número del negocio) y el pedido queda en "Pendiente de pago" -- la cocina no puede aceptarlo ni prepararlo hasta que el cliente pague y Netpay lo confirme.
       </div>
       <div class="admin-form">
         <select class="admin-input admin-input-sm" id="lm-sucursal" style="display:none"></select>
@@ -222,7 +222,7 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
       <button class="btn-guardar" onclick="generarLinkManual()">Generar link de pago</button>
       <div class="admin-msg" id="lm-msg"></div>
       <div id="lm-resultado" style="display:none;margin-top:1rem;padding:1rem;border:1px solid var(--borde);background:var(--gris1)">
-        <div style="font-size:0.65rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:0.5rem">✅ Link generado -- cópialo y mándaselo al cliente</div>
+        <div style="font-size:0.65rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:0.5rem">✅ Pedido registrado y link enviado al cliente por WhatsApp -- queda en "Pendiente de pago"</div>
         <div style="display:flex;gap:0.5rem;align-items:center">
           <input class="admin-input" id="lm-link-generado" readonly style="flex:1;font-family:'DM Mono',monospace;font-size:0.7rem">
           <button class="btn-guardar" onclick="copiarLinkManual()">Copiar</button>
