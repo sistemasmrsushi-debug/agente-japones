@@ -605,7 +605,7 @@ async function crearPedidoDomicilioYPedirPago(telefono, opts) {
   } else {
     // Si falla la generacion del link, avisar y dejar pedido pendiente para revision manual
     await enviarMensaje(telefono,
-      `Tu pedido fue registrado (ID: ${pedido.id}) pero tuvimos un problema generando el link de pago. Te contactaremos en breve para confirmar el pago.`
+      `😕 Tu pedido fue registrado (ID: ${pedido.id}) pero tuvimos un problema generando el link de pago. Te contactaremos en breve para confirmar el pago, o si prefieres no esperar, puedes ordenar directo en nuestra página oficial: https://pedir.mrsushi.mx/`
     );
     logger.error(`Fallo generacion de link de pago para ${pedido.id}: ${resultadoPago.error}`);
     notificarDueno(`🔴 Netpay falló al generar el link de pago.\n\nPedido: ${pedido.id}\nCliente: ${telefono.replace("whatsapp:", "")}\nMotivo: ${resultadoPago.error}\n\nEl cliente ya recibió aviso, pero necesita que le confirmes el pago manualmente.`);
@@ -1138,6 +1138,19 @@ router.post("/webhook", validarFirmaTwilio, async (req, res) => {
 
   } catch (error) {
     logger.error("Error webhook: " + error.message);
+    // NUEVO (06-oct-2026, pedido por Diego): antes, si algo tronaba sin
+    // avisar dentro del flujo del bot, el cliente simplemente se quedaba
+    // sin ninguna respuesta -- no tenia forma de saber que algo fallo ni
+    // que otra opcion tenia. Ahora se le manda un mensaje con un camino
+    // alterno (la pagina oficial para pedir), y se le avisa a Diego para
+    // que pueda revisar que fue lo que tronó.
+    const telefonoDelError = req.body?.From;
+    if (telefonoDelError && telefonoDelError.startsWith("whatsapp:")) {
+      enviarMensaje(telefonoDelError,
+        `😕 Lo sentimos, tuvimos un problema procesando tu mensaje. Puedes intentar de nuevo en un momento, o hacer tu pedido directo en nuestra página oficial: https://pedir.mrsushi.mx/`
+      ).catch(e => logger.error("Error mandando mensaje de fallback por error de webhook: " + e.message));
+      notificarDueno(`🔴 El bot tronó procesando un mensaje.\n\nCliente: ${telefonoDelError.replace("whatsapp:", "")}\nError: ${error.message}\n\nSe le avisó al cliente que puede pedir directo en https://pedir.mrsushi.mx/ mientras se revisa.`);
+    }
   }
 });
 
@@ -1270,7 +1283,7 @@ async function ejecutarAccion(accion, datos, telefono) {
           );
         } else {
           await enviarMensaje(telefono,
-            `Tu pedido fue registrado (ID: ${pedido.id}) pero tuvimos un problema generando el link de pago. Te contactaremos en breve para confirmar el pago.`
+            `😕 Tu pedido fue registrado (ID: ${pedido.id}) pero tuvimos un problema generando el link de pago. Te contactaremos en breve para confirmar el pago, o si prefieres no esperar, puedes ordenar directo en nuestra página oficial: https://pedir.mrsushi.mx/`
           );
           logger.error(`Fallo generacion de link de pago (via IA) para ${pedido.id}: ${resultadoPago.error}`);
           notificarDueno(`🔴 Netpay falló al generar el link de pago.\n\nPedido: ${pedido.id}\nCliente: ${telefono.replace("whatsapp:", "")}\nMotivo: ${resultadoPago.error}\n\nEl cliente ya recibió aviso, pero necesita que le confirmes el pago manualmente.`);
