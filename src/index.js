@@ -31,6 +31,7 @@ const webhookUberRouter = require("./webhook/webhook_uber");
 const { initDB } = require("./db/database");
 const { iniciarAutocancelacion } = require("./utils/autocancelar_pedidos");
 const { registrarWebhook } = require("./utils/netpay");
+const { iniciarPruebaDiaria } = require("./utils/prueba_diaria");
 
 // ── RATE LIMITING ─────────────────────────────────────────────────────────────
 // Limita peticiones por IP para evitar spam/ataques al webhook
@@ -148,6 +149,12 @@ async function iniciar() {
       } else {
         logger.warn("RAILWAY_PUBLIC_DOMAIN no esta definida -- no se pudo registrar el webhook de Netpay automaticamente al arrancar.");
       }
+
+      // NUEVO (06-oct-2026, pedido por Diego): prueba interna diaria que
+      // confirma que la base de datos, Netpay y el registro del webhook
+      // siguen funcionando, y le avisa a Diego por WhatsApp -- para
+      // enterarse de un problema antes de que lo reporte un cliente real.
+      iniciarPruebaDiaria();
     });
   } catch(err) {
     logger.error("Error iniciando: " + err.message);
