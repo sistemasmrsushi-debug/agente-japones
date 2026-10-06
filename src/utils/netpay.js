@@ -256,6 +256,10 @@ async function generarLinkPago({ items, referencia, telefono, nombreCliente, dir
               exito: true,
               linkPago: link,
               sessionId: json.sessionId || json.id || null,
+              // NUEVO (06-oct-2026): id numerico interno de Netpay para esta
+              // sesion de pago, distinto del sessionId de texto -- ver el
+              // comentario junto a consultarEstatusPorSesion mas abajo.
+              checkoutId: json.id || null,
               raw: json,
             });
           } else {
@@ -344,59 +348,102 @@ async function consultarEstatusTransaccion(transactionId, secretKey) {
 // pendiente) regresa pagado=false sin tronar -- es un respaldo adicional,
 // nunca debe arriesgarse a marcar como pagado un pedido que no se pudo
 // confirmar de verdad. Ver src/utils/pago_respaldo.js para como se usa esto.
-async function consultarEstatusPorSesion(sessionId, secretKey) {
+//
+// ACTUALIZADO (06-oct-2026, tras la primera prueba real en vivo): el primer
+// intento (GET .../checkout/session/{sessionId de texto}) dio 404 -- Netpay
+// no reconoce ese identificador en esa ruta. Como seguimos sin documentacion
+// publica, en vez de apostarle a un solo patron se intentan varias rutas
+// plausibles EN ORDEN (son todas lecturas GET, no modifican nada), y se usa
+// la primera que responda 2xx con un cuerpo que se pueda interpretar. Si
+// ninguna funciona, se sigue fallando de forma segura (pagado=false) igual
+// que antes. Cuando se confirme cual es la correcta (por los logs de una
+// prueba real, o si Netpay la documenta), se puede simplificar esto a una
+// sola llamada.
+function intentarGet(path, key) {
   return new Promise((resolve) => {
-    const key = secretKey || process.env.NETPAY_SECRET_KEY;
-
     const options = {
       hostname: getHostname(),
-      path: `/gateway-ecommerce/v3.2/checkout/session/${encodeURIComponent(sessionId)}`,
+      path,
       method: "GET",
       timeout: 10000,
       headers: { "Content-Type": "application/json", "Authorization": key },
     };
-
     const req = https.request(options, (res) => {
       let data = "";
       res.on("data", chunk => data += chunk);
-      res.on("end", () => {
-        logger.info(`Consulta de respaldo (sessionId ${sessionId}) -> status ${res.statusCode}, body: ${data.substring(0, 500)}`);
-        try {
-          const json = JSON.parse(data);
-          // Variantes plausibles de como Netpay podria indicar "ya se pago"
-          // -- se aceptan varias porque no hay documentacion publica
-          // confirmada del formato exacto de esta respuesta.
-          const pagado = json.paidOut === true
-            || json.status === "PAID"
-            || json.status === "paid"
-            || json.status === "COMPLETED"
-            || json.transactionStatus === "PAID"
-            || !!json.transactionId;
-          resolve({
-            consultado: res.statusCode >= 200 && res.statusCode < 300,
-            pagado,
-            transactionId: json.transactionId || null,
-            lastFourDigits: json.lastFourDigits || json.cardLastFour || null,
-            statusCode: res.statusCode,
-            raw: json,
-          });
-        } catch (e) {
-          resolve({ consultado: false, pagado: false, error: "Respuesta invalida: " + e.message, statusCode: res.statusCode });
-        }
-      });
+      res.on("end", () => resolve({ statusCode: res.statusCode, body: data }));
     });
-
-    req.on("timeout", () => {
-      req.destroy();
-      resolve({ consultado: false, pagado: false, error: "Timeout consultando sesion" });
-    });
-
-    req.on("error", (e) => {
-      resolve({ consultado: false, pagado: false, error: e.message });
-    });
-
+    req.on("timeout", () => { req.destroy(); resolve({ statusCode: null, error: "timeout" }); });
+    req.on("error", (e) => resolve({ statusCode: null, error: e.message }));
     req.end();
   });
+}
+
+async function consultarEstatusPorSesion(sessionId, checkoutId, merchantRefCode, secretKey) {
+  const key = secretKey || process.env.NETPAY_SECRET_KEY;
+
+  const candidatos = [];
+  if (checkoutId) candidatos.push({ label: "id numerico", path: `/gateway-ecommerce/v3.2/checkout/session/${encodeURIComponent(checkoutId)}` });
+  if (sessionId) candidatos.push({ label: "sessionId, ruta plural", path: `/gateway-ecommerce/v3.2/checkout/sessions/${encodeURIComponent(sessionId)}` });
+  if (checkoutId) candidatos.push({ label: "id numerico, ruta plural", path: `/gateway-ecommerce/v3.2/checkout/sessions/${encodeURIComponent(checkoutId)}` });
+  if (merchantRefCode) candidatos.push({ label: "busqueda por referencia", path: `/gateway-ecommerce/v3/transactions?merchantReferenceCode=${encodeURIComponent(merchantRefCode)}` });
+
+  let ultimoIntento = null;
+
+  for (const candidato of candidatos) {
+    const resultado = await intentarGet(candidato.path, key);
+    ultimoIntento = resultado;
+
+    if (resultado.error) {
+      logger.info(`Consulta de respaldo (${candidato.label}) -> error de red: ${resultado.error}`);
+      continue;
+    }
+
+    logger.info(`Consulta de respaldo (${candidato.label}) -> status ${resultado.statusCode}, body: ${resultado.body.substring(0, 500)}`);
+
+    if (resultado.statusCode < 200 || resultado.statusCode >= 300) continue;
+
+    try {
+      const json = JSON.parse(resultado.body);
+      // Si la respuesta es una lista (ej. busqueda por referencia), toma el
+      // primer elemento -- es lo mas comun en este tipo de endpoints.
+      const registro = Array.isArray(json) ? json[0] : (Array.isArray(json.content) ? json.content[0] : (Array.isArray(json.data) ? json.data[0] : json));
+      if (!registro) continue;
+
+      // Variantes plausibles de como Netpay podria indicar "ya se pago" --
+      // se aceptan varias porque no hay documentacion publica confirmada del
+      // formato exacto de esta respuesta.
+      const pagado = registro.paidOut === true
+        || registro.status === "PAID"
+        || registro.status === "paid"
+        || registro.status === "COMPLETED"
+        || registro.status === "APPROVED"
+        || registro.transactionStatus === "PAID"
+        || !!registro.transactionId;
+
+      return {
+        consultado: true,
+        pagado,
+        transactionId: registro.transactionId || null,
+        lastFourDigits: registro.lastFourDigits || registro.cardLastFour || null,
+        statusCode: resultado.statusCode,
+        endpointUsado: candidato.label,
+        raw: json,
+      };
+    } catch (e) {
+      logger.info(`Consulta de respaldo (${candidato.label}) -> respuesta no es JSON valido: ${e.message}`);
+      continue;
+    }
+  }
+
+  // Ninguna ruta candidata funciono -- se falla de forma segura, igual que
+  // si la consulta nunca se hubiera podido hacer.
+  return {
+    consultado: false,
+    pagado: false,
+    error: candidatos.length ? "Ninguna ruta candidata de Netpay respondio con datos reconocibles" : "No hay sessionId/checkoutId/referencia para consultar",
+    statusCode: ultimoIntento ? ultimoIntento.statusCode : null,
+  };
 }
 
 // ── REGISTRAR URL DE WEBHOOK ──────────────────────────────────────────────────

@@ -241,8 +241,8 @@ async function reenviarLinkPago(pedido) {
   });
 
   if (resultadoPago.exito) {
-    await db.guardarSessionNetpay(pedido.id, resultadoPago.sessionId);
-    programarRevisionRespaldo(pedido.id, resultadoPago.sessionId);
+    await db.guardarSessionNetpay(pedido.id, resultadoPago.sessionId, resultadoPago.checkoutId);
+    programarRevisionRespaldo(pedido.id, resultadoPago.sessionId, resultadoPago.checkoutId);
     await enviarMensaje(pedido.telefono_cliente,
       `💳 Aquí tienes un nuevo link de pago para tu pedido ${pedido.id}:\n${resultadoPago.linkPago}`
     );
@@ -365,8 +365,8 @@ async function crearPedidoManualYGenerarLink({ telefono, nombreCliente, sucursal
     return { exito: false, error: resultadoPago.error, pedidoId: pedido.id };
   }
 
-  await db.guardarSessionNetpay(pedido.id, resultadoPago.sessionId);
-  programarRevisionRespaldo(pedido.id, resultadoPago.sessionId);
+  await db.guardarSessionNetpay(pedido.id, resultadoPago.sessionId, resultadoPago.checkoutId);
+  programarRevisionRespaldo(pedido.id, resultadoPago.sessionId, resultadoPago.checkoutId);
 
   // REVERTIDO (05-oct-2026, pedido por Diego): el envio automatico por
   // WhatsApp que se agrego aqui se quita -- se confirmo con logs reales de
@@ -580,8 +580,8 @@ async function crearPedidoDomicilioYPedirPago(telefono, opts) {
   });
 
   if (resultadoPago.exito) {
-    await db.guardarSessionNetpay(pedido.id, resultadoPago.sessionId);
-    programarRevisionRespaldo(pedido.id, resultadoPago.sessionId);
+    await db.guardarSessionNetpay(pedido.id, resultadoPago.sessionId, resultadoPago.checkoutId);
+    programarRevisionRespaldo(pedido.id, resultadoPago.sessionId, resultadoPago.checkoutId);
     await enviarMensaje(telefono,
       `🍣 ¡Tu pedido está listo para confirmar!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\n${totalTexto}\nSucursal: ${pedido.sucursal}\nDirección: ${pedido.direccion}\n\n💳 Para confirmar tu pedido realiza tu pago aquí:\n${resultadoPago.linkPago}\n\n⏱️ Tienes 15 minutos para completar el pago.`
     );
@@ -1289,8 +1289,8 @@ async function ejecutarAccion(accion, datos, telefono) {
         });
 
         if (resultadoPago.exito) {
-          await db.guardarSessionNetpay(pedido.id, resultadoPago.sessionId);
-          programarRevisionRespaldo(pedido.id, resultadoPago.sessionId);
+          await db.guardarSessionNetpay(pedido.id, resultadoPago.sessionId, resultadoPago.checkoutId);
+          programarRevisionRespaldo(pedido.id, resultadoPago.sessionId, resultadoPago.checkoutId);
           await enviarMensaje(telefono,
             `🍣 ¡Tu pedido está listo para confirmar!\n\nID: ${pedido.id}\n\n${itemsTextoDomicilio}\n\n${totalTextoDomicilio}\nSucursal: ${pedido.sucursal}\nDirección: ${pedido.direccion}\n\n💳 Para confirmar tu pedido realiza tu pago aquí:\n${resultadoPago.linkPago}\n\n⏱️ Tienes 15 minutos para completar el pago.`
           );

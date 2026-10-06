@@ -80,6 +80,13 @@ async function initDB() {
     // pago esto?" como respaldo si su aviso automatico (webhook) nunca llega
     // -- ver src/utils/pago_respaldo.js.
     await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS netpay_session_id TEXT;`);
+    // NUEVO (06-oct-2026): ademas del sessionId (texto, el que va en la URL
+    // del checkout), Netpay tambien regresa un "id" numerico interno al
+    // crear la sesion de pago. La primera prueba real del respaldo (06-oct-2026)
+    // demostro que consultar por el sessionId de texto da 404 -- es probable
+    // que la API espere este id numerico en su lugar. Se guarda por separado
+    // para poder usarlo (y para depurar a mano por SQL si hace falta).
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS netpay_checkout_id TEXT;`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS reservaciones (
         id TEXT PRIMARY KEY,
@@ -336,9 +343,9 @@ async function actualizarEstadoPedido(id, estado) {
 // para tener su id, que es la "referencia" que se le manda a Netpay). Ver
 // src/utils/pago_respaldo.js -- se usa para poder consultar directamente
 // con Netpay si el pago se completo, en caso de que su webhook nunca llegue.
-async function guardarSessionNetpay(id, sessionId) {
+async function guardarSessionNetpay(id, sessionId, checkoutId) {
   if (!sessionId) return;
-  await pool.query("UPDATE pedidos SET netpay_session_id=$1 WHERE id=$2", [sessionId, id]);
+  await pool.query("UPDATE pedidos SET netpay_session_id=$1, netpay_checkout_id=$2 WHERE id=$3", [sessionId, checkoutId || null, id]);
 }
 
 async function marcarPedidoPagado(id) {

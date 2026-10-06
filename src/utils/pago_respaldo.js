@@ -64,23 +64,32 @@ async function enviarMensaje(telefono, texto) {
 // nada de inmediato -- solo programa la revision para dentro de unos
 // minutos. Si no hay sessionId (ej. Netpay no lo regreso por alguna razon),
 // no se puede consultar nada despues, asi que no se programa nada.
-function programarRevisionRespaldo(pedidoId, sessionId) {
+//
+// checkoutId (06-oct-2026, tras la primera prueba real): ademas del
+// sessionId de texto se pasa el id numerico interno que Netpay tambien
+// regresa -- la primera prueba demostro que consultar solo con el sessionId
+// de texto da 404. Ver el comentario junto a consultarEstatusPorSesion en
+// src/utils/netpay.js para el detalle completo.
+function programarRevisionRespaldo(pedidoId, sessionId, checkoutId) {
   if (!sessionId) return;
   setTimeout(() => {
-    revisarYConfirmar(pedidoId, sessionId).catch((e) =>
+    revisarYConfirmar(pedidoId, sessionId, checkoutId).catch((e) =>
       logger.error(`Error en revision de respaldo de pago para ${pedidoId}: ${e.message}`)
     );
   }, RETRASO_MS);
 }
 
-async function revisarYConfirmar(pedidoId, sessionId) {
+async function revisarYConfirmar(pedidoId, sessionId, checkoutId) {
   const pedido = await db.obtenerPedidoPorId(pedidoId);
   // Si ya no esta "pendiente_pago" es porque el webhook SI llego a tiempo
   // (lo normal), o porque se cancelo/resolvio de otra forma -- no hay nada
   // que hacer.
   if (!pedido || pedido.estado !== "pendiente_pago") return;
 
-  const resultado = await consultarEstatusPorSesion(sessionId);
+  // pedidoId es tambien el merchantRefCode que se le mando a Netpay al crear
+  // el link de pago (ver "referencia" en generarLinkPago) -- se manda como
+  // tercer intento por si las rutas por sessionId/checkoutId no funcionan.
+  const resultado = await consultarEstatusPorSesion(sessionId, checkoutId, pedidoId);
 
   if (!resultado.consultado) {
     logger.warn(`Revision de respaldo: no se pudo consultar la sesion ${sessionId} del pedido ${pedidoId} -- ${resultado.error || "sin detalle"}. Se deja que el flujo normal (auto-cancelado a los 15 min) siga su curso.`);
@@ -88,7 +97,7 @@ async function revisarYConfirmar(pedidoId, sessionId) {
   }
 
   if (!resultado.pagado) {
-    logger.info(`Revision de respaldo: pedido ${pedidoId} sigue sin pagarse segun Netpay (sessionId ${sessionId}).`);
+    logger.info(`Revision de respaldo: pedido ${pedidoId} sigue sin pagarse segun Netpay (sessionId ${sessionId}, via ${resultado.endpointUsado || "?"}).`);
     return;
   }
 
