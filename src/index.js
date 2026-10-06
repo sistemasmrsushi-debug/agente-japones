@@ -30,6 +30,7 @@ const pagoPaginasRouter = require("./webhook/pago_paginas");
 const webhookUberRouter = require("./webhook/webhook_uber");
 const { initDB } = require("./db/database");
 const { iniciarAutocancelacion } = require("./utils/autocancelar_pedidos");
+const { registrarWebhook } = require("./utils/netpay");
 
 // ── RATE LIMITING ─────────────────────────────────────────────────────────────
 // Limita peticiones por IP para evitar spam/ataques al webhook
@@ -126,6 +127,27 @@ async function iniciar() {
 
       logger.info(`Keep-alive activo -> ping cada 5 min a ${URL_PROPIA}`);
       iniciarAutocancelacion();
+
+      // NUEVO (06-oct-2026, reportado por Diego con caso real: un cliente
+      // pago y nunca llego el aviso por WhatsApp): el webhook de Netpay se
+      // registraba UNA SOLA VEZ a mano (ver registrar_webhook_netpay.js), y
+      // si el dominio publico de Railway llegaba a cambiar (recrear el
+      // servicio, cambio de plan, etc.), Netpay se quedaba avisando a una
+      // URL vieja sin que nadie se diera cuenta -- hasta que un cliente
+      // pagaba y la confirmacion nunca llegaba. Ahora se vuelve a registrar
+      // solo, en cada arranque del servidor, para que nunca dependa de que
+      // alguien se acuerde de correr el script a mano. Es un PUT idempotente
+      // del lado de Netpay (sobreescribe la URL, no crea duplicados), asi que
+      // no pasa nada si se repite en cada deploy/restart. No debe tronar el
+      // arranque del servidor si Netpay no responde -- solo se registra en
+      // el log para poder revisarlo despues.
+      if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+        registrarWebhook()
+          .then(r => logger.info(`Registro automatico de webhook Netpay al arrancar -> status ${r.statusCode}`))
+          .catch(e => logger.error(`No se pudo registrar el webhook de Netpay al arrancar: ${e.message}`));
+      } else {
+        logger.warn("RAILWAY_PUBLIC_DOMAIN no esta definida -- no se pudo registrar el webhook de Netpay automaticamente al arrancar.");
+      }
     });
   } catch(err) {
     logger.error("Error iniciando: " + err.message);
