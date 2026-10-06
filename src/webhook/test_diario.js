@@ -27,10 +27,17 @@ const { crearPedidoManualYGenerarLink } = require("./whatsapp");
 
 const NOMBRE_SUCURSAL_PRUEBA = "Sucursal de Prueba";
 
-// Direccion real (una sucursal existente) para que la validacion contra
-// Google Maps en crearPedidoManualYGenerarLink siempre pase -- la prueba no
-// debe depender de que una direccion inventada se geocodifique bien.
-const DIRECCION_PRUEBA = "Av. Patriotismo No. 229, Col. San Pedro de Los Pinos, CDMX";
+// Direccion para que la validacion contra Google Maps en
+// crearPedidoManualYGenerarLink siempre pase -- la prueba no debe depender
+// de que una direccion inventada se geocodifique bien. Se usa literal el
+// texto que Google Maps ya regreso una vez para un pedido real (PED-
+// 1791239589496, 05-oct-2026) -- no una direccion armada a mano -- porque
+// la primera version (una direccion de una sucursal copiada de
+// config/restaurante.js, nunca antes geocodificada) fallo la validacion en
+// la primera corrida real de esta prueba (06-oct-2026): "No encontramos esa
+// direccion". Usar el formato EXACTO que Google ya devolvio una vez quita
+// esa incertidumbre.
+const DIRECCION_PRUEBA = "Avenida Lomas Verdes 22, Lomas Verdes Alteña II, 53120 Naucalpan de Juárez, Méx.";
 
 function validarToken(req, res) {
   const token = process.env.TEST_DIARIO_TOKEN;
