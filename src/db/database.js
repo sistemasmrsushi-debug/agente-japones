@@ -419,6 +419,12 @@ async function obtenerClientePorTelefono(telefono) {
 
 async function obtenerStatsPedidos() {
   const hoy = new Date().toISOString().split("T")[0];
+  // NUEVO (06-oct-2026): se excluye "Sucursal de Prueba" -- es la sucursal
+  // ficticia usada por la prueba diaria automatizada que paga un pedido real
+  // en sandbox de Netpay para confirmar que el webhook de pagos sigue
+  // llegando (ver src/webhook/test_diario.js). Esos pedidos se borran justo
+  // despues de la prueba, pero por si alguno llegara a quedar atorado, mejor
+  // que nunca aparezca mezclado en las estadisticas reales del negocio.
   const { rows } = await pool.query(`
     SELECT
       sucursal,
@@ -426,10 +432,20 @@ async function obtenerStatsPedidos() {
       COUNT(*) FILTER (WHERE fecha::date = $1::date) as hoy,
       COUNT(*) FILTER (WHERE estado = 'pendiente') as pendientes
     FROM pedidos
+    WHERE sucursal <> 'Sucursal de Prueba'
     GROUP BY sucursal
     ORDER BY sucursal
   `, [hoy]);
   return rows;
+}
+
+// NUEVO (06-oct-2026, para la prueba diaria automatizada): borra un pedido
+// por id. Se usa UNICAMENTE para limpiar el pedido de prueba despues de
+// confirmar que el webhook de pago funciono -- nunca para pedidos reales
+// (ver verificacion de sucursal en src/webhook/test_diario.js antes de
+// llamar a esta funcion).
+async function eliminarPedido(id) {
+  await pool.query("DELETE FROM pedidos WHERE id = $1", [id]);
 }
 
 // ── RESERVACIONES ─────────────────────────────────────────────────────────────
@@ -890,6 +906,7 @@ module.exports = {
   obtenerPedidoPorUberDeliveryId,
   obtenerPedidoPorId,
   obtenerStatsPedidos,
+  eliminarPedido,
   guardarReservacion,
   obtenerReservaciones,
   actualizarEstadoReservacion,

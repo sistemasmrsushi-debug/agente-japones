@@ -28,6 +28,7 @@ const adminRouter = require("./dashboard/admin");
 const webhookNetpayRouter = require("./webhook/webhook_netpay");
 const pagoPaginasRouter = require("./webhook/pago_paginas");
 const webhookUberRouter = require("./webhook/webhook_uber");
+const testDiarioRouter = require("./webhook/test_diario");
 const { initDB } = require("./db/database");
 const { iniciarAutocancelacion } = require("./utils/autocancelar_pedidos");
 const { registrarWebhook } = require("./utils/netpay");
@@ -82,6 +83,7 @@ app.use("/", adminRouter);
 app.use("/", webhookNetpayRouter);
 app.use("/", pagoPaginasRouter);
 app.use("/", webhookUberRouter);
+app.use("/", testDiarioRouter);
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString(), app: "Agente Mr. Sushi Call Center" });
