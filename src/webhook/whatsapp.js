@@ -359,39 +359,19 @@ async function crearPedidoManualYGenerarLink({ telefono, nombreCliente, sucursal
     return { exito: false, error: resultadoPago.error, pedidoId: pedido.id };
   }
 
-  // Se le manda el link al cliente por WhatsApp (del numero del negocio),
-  // igual que a un pedido a domicilio tomado por el bot -- el pedido se
-  // queda en "pendiente_pago" y la cocina NO puede aceptarlo/prepararlo
-  // hasta que Netpay confirme el pago (ver webhook_netpay.js -> marcarPedidoPagado
-  // -> pasa a "pendiente", que es cuando aparece el boton "Aceptar pedido").
-  const itemsTexto = itemsNormalizados.map(formatearItemTexto).join("\n");
-  await enviarMensaje(telefonoFinal,
-    `🍣 ¡Tu pedido está listo para confirmar!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\nTotal: $${totalBase}\nSucursal: ${pedido.sucursal}\nDirección: ${pedido.direccion}\n\n💳 Para confirmar tu pedido realiza tu pago aquí:\n${resultadoPago.linkPago}\n\n⏱️ Tienes 15 minutos para completar el pago.`
-  );
-  logger.info(`Link de pago manual enviado por WhatsApp a ${telefonoFinal} para ${pedido.id}`);
-
-  // Mismo recordatorio y auto-cancelacion a los 15 min que usan los pedidos
-  // a domicilio del bot (ver crearPedidoDomicilioYPedirPago) -- si nadie en
-  // la sucursal le hace seguimiento aparte, el pedido no se queda "flotando"
-  // en pendiente_pago para siempre.
-  setTimeout(async () => {
-    const pedidoActual = (await db.obtenerPedidos(null, "gerente")).find(p => p.id === pedido.id);
-    if (pedidoActual && pedidoActual.estado === "pendiente_pago") {
-      await enviarMensaje(telefonoFinal,
-        `⏱️ Recordatorio: tu pedido ${pedido.id} sigue esperando confirmación de pago. Tienes 5 minutos más antes de que se cancele.\n\n${resultadoPago.linkPago}`
-      );
-    }
-  }, 10 * 60 * 1000);
-  setTimeout(async () => {
-    const pedidoActual = (await db.obtenerPedidos(null, "gerente")).find(p => p.id === pedido.id);
-    if (pedidoActual && pedidoActual.estado === "pendiente_pago") {
-      await db.actualizarEstadoPedido(pedido.id, "cancelado");
-      await enviarMensaje(telefonoFinal,
-        `Tu pedido ${pedido.id} fue cancelado por falta de pago. Si quieres intentar de nuevo, ¡contáctanos! 🍣`
-      );
-      logger.info(`Pedido manual ${pedido.id} cancelado automaticamente por falta de pago`);
-    }
-  }, 15 * 60 * 1000);
+  // REVERTIDO (05-oct-2026, pedido por Diego): el envio automatico por
+  // WhatsApp que se agrego aqui se quita -- se confirmo con logs reales de
+  // Twilio que WhatsApp SIEMPRE rechaza ("Undelivered" a nivel Carrier
+  // Network) un mensaje de texto libre iniciado por el negocio hacia un
+  // numero que nunca le ha escrito al bot (no hay ventana de 24h abierta).
+  // Como estos pedidos son EXACTAMENTE eso -- clientes que nunca hablaron
+  // con el bot -- el envio automatico fallaria siempre. La solucion real
+  // (una plantilla de mensaje aprobada por Meta) tiene un costo por mensaje
+  // que Diego decidio no asumir por ahora. Se vuelve al diseño original: el
+  // link se regresa en la respuesta para que el panel lo muestre con boton
+  // de "copiar", y la sucursal se lo manda al cliente ella misma por el
+  // medio que prefiera (eso si funciona siempre, sin depender de Twilio).
+  logger.info(`Link de pago manual generado para ${pedido.id} (se muestra en el panel para copiar, no se manda por WhatsApp)`);
 
   return { exito: true, pedidoId: pedido.id, linkPago: resultadoPago.linkPago, direccionResuelta: pedido.direccion };
 }
@@ -612,6 +592,14 @@ async function crearPedidoDomicilioYPedirPago(telefono, opts) {
           `Tu pedido ${pedido.id} fue cancelado por falta de pago. Si quieres intentar de nuevo, ¡escríbenos! 🍣`
         );
         logger.info(`Pedido ${pedido.id} cancelado automaticamente por falta de pago`);
+        // NUEVO (06-oct-2026, pedido por Diego): antes esta cancelacion solo
+        // se le avisaba al cliente -- Diego se entero de un caso real (el
+        // cliente SI habia pagado, pero el webhook de Netpay nunca llego)
+        // hasta que el cliente se quejo directamente con el. Ahora se le
+        // avisa a Diego tambien, en el momento, para que pueda revisar en
+        // Netpay si el cliente de verdad pago antes de que se pierda el
+        // pedido sin que nadie se de cuenta.
+        notificarDueno(`🟠 Un pedido se canceló automáticamente por falta de pago.\n\nPedido: ${pedido.id}\nCliente: ${telefono.replace("whatsapp:", "")}\nSucursal: ${pedido.sucursal}\nLink de pago: ${resultadoPago.linkPago}\n\nSi el cliente dice que sí pagó, revisa manualmente en el panel de Netpay -- puede ser que el aviso de pago no nos haya llegado.`);
       }
     }, 15 * 60 * 1000);
   } else {
@@ -1409,6 +1397,7 @@ module.exports = router;
 module.exports.reenviarLinkPago = reenviarLinkPago;
 // NUEVO (29-sep-2026, pedido por Diego): panel "Domicilio" del dashboard --
 // pedidos que la sucursal toma a mano (telefono, mostrador) y para los que
-// se genera Y manda el link de pago por WhatsApp automaticamente (ver
-// dashboard.js).
+// solo se genera el link de pago (la sucursal lo copia y se lo manda ella
+// misma -- ver nota del 05-oct-2026 en la funcion sobre por que no se manda
+// automatico por WhatsApp). Ver dashboard.js.
 module.exports.crearPedidoManualYGenerarLink = crearPedidoManualYGenerarLink;
