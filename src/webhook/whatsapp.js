@@ -10,6 +10,7 @@ const { generarLinkPago } = require("../utils/netpay");
 const { estaAbierto, textoHorario } = require("../utils/horario");
 const { validarCupon, calcularDescuento } = require("../utils/cupones");
 const { notificarDueno } = require("../utils/alertas");
+const { programarRevisionRespaldo } = require("../utils/pago_respaldo");
 
 function getTwilioClient() {
   return require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -237,6 +238,8 @@ async function reenviarLinkPago(pedido) {
   });
 
   if (resultadoPago.exito) {
+    await db.guardarSessionNetpay(pedido.id, resultadoPago.sessionId);
+    programarRevisionRespaldo(pedido.id, resultadoPago.sessionId);
     await enviarMensaje(pedido.telefono_cliente,
       `💳 Aquí tienes un nuevo link de pago para tu pedido ${pedido.id}:\n${resultadoPago.linkPago}`
     );
@@ -358,6 +361,9 @@ async function crearPedidoManualYGenerarLink({ telefono, nombreCliente, sucursal
     notificarDueno(`🔴 Netpay falló al generar un link de pago manual.\n\nPedido: ${pedido.id}\nSucursal: ${pedido.sucursal}\nMotivo: ${resultadoPago.error}\n\nEl pedido ya quedó registrado en el dashboard -- intenta "Reenviar link" desde ahí.`);
     return { exito: false, error: resultadoPago.error, pedidoId: pedido.id };
   }
+
+  await db.guardarSessionNetpay(pedido.id, resultadoPago.sessionId);
+  programarRevisionRespaldo(pedido.id, resultadoPago.sessionId);
 
   // REVERTIDO (05-oct-2026, pedido por Diego): el envio automatico por
   // WhatsApp que se agrego aqui se quita -- se confirmo con logs reales de
@@ -571,6 +577,8 @@ async function crearPedidoDomicilioYPedirPago(telefono, opts) {
   });
 
   if (resultadoPago.exito) {
+    await db.guardarSessionNetpay(pedido.id, resultadoPago.sessionId);
+    programarRevisionRespaldo(pedido.id, resultadoPago.sessionId);
     await enviarMensaje(telefono,
       `🍣 ¡Tu pedido está listo para confirmar!\n\nID: ${pedido.id}\n\n${itemsTexto}\n\n${totalTexto}\nSucursal: ${pedido.sucursal}\nDirección: ${pedido.direccion}\n\n💳 Para confirmar tu pedido realiza tu pago aquí:\n${resultadoPago.linkPago}\n\n⏱️ Tienes 15 minutos para completar el pago.`
     );
@@ -1278,6 +1286,8 @@ async function ejecutarAccion(accion, datos, telefono) {
         });
 
         if (resultadoPago.exito) {
+          await db.guardarSessionNetpay(pedido.id, resultadoPago.sessionId);
+          programarRevisionRespaldo(pedido.id, resultadoPago.sessionId);
           await enviarMensaje(telefono,
             `🍣 ¡Tu pedido está listo para confirmar!\n\nID: ${pedido.id}\n\n${itemsTextoDomicilio}\n\n${totalTextoDomicilio}\nSucursal: ${pedido.sucursal}\nDirección: ${pedido.direccion}\n\n💳 Para confirmar tu pedido realiza tu pago aquí:\n${resultadoPago.linkPago}\n\n⏱️ Tienes 15 minutos para completar el pago.`
           );

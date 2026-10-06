@@ -74,6 +74,12 @@ async function initDB() {
     // de WhatsApp con la IA. Sirve para distinguirlos en el dashboard y en los
     // reportes, sin cambiar nada del comportamiento de los pedidos existentes.
     await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen TEXT DEFAULT 'bot';`);
+    // NUEVO (06-oct-2026, pedido por Diego, tras el incidente del certificado
+    // SSL de Netpay): guarda el sessionId que Netpay regresa al generar el
+    // link de pago, para poder preguntarle directamente a Netpay "¿ya se
+    // pago esto?" como respaldo si su aviso automatico (webhook) nunca llega
+    // -- ver src/utils/pago_respaldo.js.
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS netpay_session_id TEXT;`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS reservaciones (
         id TEXT PRIMARY KEY,
@@ -325,6 +331,16 @@ async function actualizarEstadoPedido(id, estado) {
 // sessionLink.paid) -- ademas de pasar el pedido a "pendiente", registra el
 // momento exacto del pago en pago_confirmado_en para que el auto-cancelador
 // cuente sus 15 min desde ahi y no desde la creacion del pedido.
+// Guarda el sessionId de Netpay para un pedido ya creado (el sessionId solo
+// se conoce DESPUES de guardar el pedido, porque primero hay que crearlo
+// para tener su id, que es la "referencia" que se le manda a Netpay). Ver
+// src/utils/pago_respaldo.js -- se usa para poder consultar directamente
+// con Netpay si el pago se completo, en caso de que su webhook nunca llegue.
+async function guardarSessionNetpay(id, sessionId) {
+  if (!sessionId) return;
+  await pool.query("UPDATE pedidos SET netpay_session_id=$1 WHERE id=$2", [sessionId, id]);
+}
+
 async function marcarPedidoPagado(id) {
   const { rows } = await pool.query(
     "UPDATE pedidos SET estado='pendiente', pago_confirmado_en=NOW(), actualizado=NOW() WHERE id=$1 RETURNING *",
@@ -898,6 +914,7 @@ module.exports = {
   obtenerPedidosPendientesVencidos,
   actualizarEstadoPedido,
   marcarPedidoPagado,
+  guardarSessionNetpay,
   actualizarGPSPedido,
   guardarClienteDireccion,
   obtenerClientePorTelefono,

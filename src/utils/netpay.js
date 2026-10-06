@@ -302,6 +302,83 @@ async function consultarEstatusTransaccion(transactionId, secretKey) {
   });
 }
 
+// ── CONSULTAR ESTATUS POR SESSION ID (respaldo si el webhook nunca llega) ─────
+// NUEVO (06-oct-2026, pedido por Diego, tras el incidente del certificado SSL
+// de Netpay del 06-oct-2026 -- mismo problema que ya habia pasado en julio):
+// cuando el webhook de pago no llega (por el problema del certificado fijado
+// de Netpay, o cualquier otra razon), el pedido se queda "pendiente_pago"
+// hasta que se cancela solo a los 15 min, aunque el cliente SI haya pagado.
+//
+// No hay un endpoint publico documentado para esto en docs.netpay.com.mx (el
+// que da el estatus por transactionId -- consultarEstatusTransaccion arriba
+// -- no sirve aqui porque el transactionId de Netpay solo se conoce cuando
+// SU webhook nos lo manda, que es justo lo que no esta llegando). Esta
+// funcion intenta el patron mas comun para este tipo de API (GET sobre el
+// mismo recurso que se creo con POST /checkout/session/), usando el
+// sessionId que SI tenemos desde que se genero el link de pago.
+//
+// Como no esta confirmado el formato exacto de la respuesta, esta funcion es
+// deliberadamente conservadora: solo reporta "pagado" si encuentra una señal
+// explicita e inequivoca en la respuesta. Cualquier otra cosa (error de red,
+// formato de respuesta que no se reconoce, o pago que de verdad sigue
+// pendiente) regresa pagado=false sin tronar -- es un respaldo adicional,
+// nunca debe arriesgarse a marcar como pagado un pedido que no se pudo
+// confirmar de verdad. Ver src/utils/pago_respaldo.js para como se usa esto.
+async function consultarEstatusPorSesion(sessionId, secretKey) {
+  return new Promise((resolve) => {
+    const key = secretKey || process.env.NETPAY_SECRET_KEY;
+
+    const options = {
+      hostname: getHostname(),
+      path: `/gateway-ecommerce/v3.2/checkout/session/${encodeURIComponent(sessionId)}`,
+      method: "GET",
+      timeout: 10000,
+      headers: { "Content-Type": "application/json", "Authorization": key },
+    };
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", chunk => data += chunk);
+      res.on("end", () => {
+        logger.info(`Consulta de respaldo (sessionId ${sessionId}) -> status ${res.statusCode}, body: ${data.substring(0, 500)}`);
+        try {
+          const json = JSON.parse(data);
+          // Variantes plausibles de como Netpay podria indicar "ya se pago"
+          // -- se aceptan varias porque no hay documentacion publica
+          // confirmada del formato exacto de esta respuesta.
+          const pagado = json.paidOut === true
+            || json.status === "PAID"
+            || json.status === "paid"
+            || json.status === "COMPLETED"
+            || json.transactionStatus === "PAID"
+            || !!json.transactionId;
+          resolve({
+            consultado: res.statusCode >= 200 && res.statusCode < 300,
+            pagado,
+            transactionId: json.transactionId || null,
+            lastFourDigits: json.lastFourDigits || json.cardLastFour || null,
+            statusCode: res.statusCode,
+            raw: json,
+          });
+        } catch (e) {
+          resolve({ consultado: false, pagado: false, error: "Respuesta invalida: " + e.message, statusCode: res.statusCode });
+        }
+      });
+    });
+
+    req.on("timeout", () => {
+      req.destroy();
+      resolve({ consultado: false, pagado: false, error: "Timeout consultando sesion" });
+    });
+
+    req.on("error", (e) => {
+      resolve({ consultado: false, pagado: false, error: e.message });
+    });
+
+    req.end();
+  });
+}
+
 // ── REGISTRAR URL DE WEBHOOK ──────────────────────────────────────────────────
 // Se ejecuta UNA SOLA VEZ para dar de alta la URL donde Netpay mandara las notificaciones
 async function registrarWebhook(secretKey) {
@@ -341,4 +418,4 @@ async function registrarWebhook(secretKey) {
   });
 }
 
-module.exports = { generarLinkPago, consultarEstatusTransaccion, registrarWebhook };
+module.exports = { generarLinkPago, consultarEstatusTransaccion, consultarEstatusPorSesion, registrarWebhook };
