@@ -115,8 +115,14 @@ async function iniciar() {
       logger.info(`Menu PDF:          http://localhost:${PORT}/public/menu_mrsushi.pdf`);
       logger.info(`Rate limiting:     activo (webhook: 30/min, login: 10/min, api: 100/min)`);
 
-      const URL_PROPIA = process.env.RAILWAY_PUBLIC_DOMAIN
-        ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/health`
+      // CORREGIDO (06-oct-2026): usa APP_PUBLIC_DOMAIN (fijo, lo configura
+      // Diego una sola vez) en vez de RAILWAY_PUBLIC_DOMAIN -- ver el
+      // comentario junto a DOMINIO_PUBLICO en src/utils/netpay.js para el
+      // detalle completo de por que RAILWAY_PUBLIC_DOMAIN no es confiable
+      // cuando el servicio tiene mas de un dominio conectado.
+      const dominioPublico = process.env.APP_PUBLIC_DOMAIN || process.env.RAILWAY_PUBLIC_DOMAIN;
+      const URL_PROPIA = dominioPublico
+        ? `https://${dominioPublico}/health`
         : `http://localhost:${PORT}/health`;
 
       setInterval(() => {
@@ -144,12 +150,12 @@ async function iniciar() {
       // no pasa nada si se repite en cada deploy/restart. No debe tronar el
       // arranque del servidor si Netpay no responde -- solo se registra en
       // el log para poder revisarlo despues.
-      if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+      if (dominioPublico) {
         registrarWebhook()
           .then(r => logger.info(`Registro automatico de webhook Netpay al arrancar -> status ${r.statusCode}`))
           .catch(e => logger.error(`No se pudo registrar el webhook de Netpay al arrancar: ${e.message}`));
       } else {
-        logger.warn("RAILWAY_PUBLIC_DOMAIN no esta definida -- no se pudo registrar el webhook de Netpay automaticamente al arrancar.");
+        logger.warn("APP_PUBLIC_DOMAIN (ni RAILWAY_PUBLIC_DOMAIN) no esta definida -- no se pudo registrar el webhook de Netpay automaticamente al arrancar.");
       }
 
       // NUEVO (06-oct-2026, pedido por Diego): prueba interna diaria que

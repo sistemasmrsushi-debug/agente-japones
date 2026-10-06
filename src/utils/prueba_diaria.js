@@ -61,8 +61,8 @@ async function revisarNetpay() {
 
 async function revisarRegistroWebhook() {
   try {
-    if (!process.env.RAILWAY_PUBLIC_DOMAIN) {
-      return { ok: false, detalle: "RAILWAY_PUBLIC_DOMAIN no esta configurada" };
+    if (!process.env.APP_PUBLIC_DOMAIN && !process.env.RAILWAY_PUBLIC_DOMAIN) {
+      return { ok: false, detalle: "APP_PUBLIC_DOMAIN (ni RAILWAY_PUBLIC_DOMAIN) no esta configurada" };
     }
     const resultado = await registrarWebhook();
     if (resultado.statusCode >= 200 && resultado.statusCode < 300) return { ok: true };

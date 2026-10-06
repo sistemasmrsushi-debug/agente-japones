@@ -26,7 +26,10 @@ function validarFirmaTwilio(req, res, next) {
 
   const firmaTwilio = req.headers["x-twilio-signature"];
   const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const url = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}${req.originalUrl}`;
+  // CORREGIDO (06-oct-2026): ver comentario junto a DOMINIO_PUBLICO en
+  // src/utils/netpay.js -- RAILWAY_PUBLIC_DOMAIN no es confiable cuando el
+  // servicio tiene mas de un dominio conectado.
+  const url = `https://${process.env.APP_PUBLIC_DOMAIN || process.env.RAILWAY_PUBLIC_DOMAIN}${req.originalUrl}`;
 
   if (!firmaTwilio) {
     logger.warn(`Webhook sin firma Twilio - posible peticion falsa. IP: ${req.ip}`);
@@ -1351,7 +1354,7 @@ async function ejecutarAccion(accion, datos, telefono) {
 async function enviarMenuPDF(telefono) {
   try {
     const client = getTwilioClient();
-    const menuUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/public/menu_mrsushi.pdf`;
+    const menuUrl = `https://${process.env.APP_PUBLIC_DOMAIN || process.env.RAILWAY_PUBLIC_DOMAIN}/public/menu_mrsushi.pdf`;
     logger.info(`Enviando PDF a ${telefono}: ${menuUrl}`);
     await client.messages.create({
       from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,

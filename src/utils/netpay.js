@@ -13,6 +13,26 @@ function getHostname() {
   return process.env.NETPAY_ENV === "production" ? HOSTNAME_PROD : HOSTNAME_SANDBOX;
 }
 
+// NUEVO (06-oct-2026, pedido por Diego, root-cause real del incidente del
+// 06-oct-2026 con el webhook de pago): RAILWAY_PUBLIC_DOMAIN NO es estable
+// cuando el servicio tiene mas de un dominio conectado (ver Settings ->
+// Networking -> Domains en Railway) -- confirmado en vivo: el mismo
+// deploy registro el webhook con Netpay apuntando a un dominio DISTINTO
+// (agentemrsushi-production.up.railway.app) del que se usa en todos lados
+// (agente-japones-production.up.railway.app), sin que nadie cambiara nada a
+// proposito. Eso hacia que el aviso de pago de Netpay se registrara contra
+// un dominio que nadie prueba ni usa, y nunca llegara.
+//
+// APP_PUBLIC_DOMAIN es una variable de entorno nueva que Diego debe
+// configurar UNA VEZ en Railway (Variables) con el valor fijo
+// "agente-japones-production.up.railway.app" -- a diferencia de
+// RAILWAY_PUBLIC_DOMAIN (que Railway asigna solo y puede cambiar), esta no
+// la toca nadie mas que Diego, asi que no puede "voltearse" sola entre
+// deploys. Mientras esa variable no exista, se sigue usando
+// RAILWAY_PUBLIC_DOMAIN como respaldo para no romper nada de un dia para
+// otro.
+const DOMINIO_PUBLICO = process.env.APP_PUBLIC_DOMAIN || process.env.RAILWAY_PUBLIC_DOMAIN;
+
 // Mapeo de estados de Mexico a su codigo ISO 3166-2:MX (subdivision, sin el
 // prefijo "MX-"). Necesario porque Google Maps regresa el nombre largo del
 // estado (ej. "Ciudad de Mexico", "Jalisco"), pero Netpay exige el estandar
@@ -194,8 +214,8 @@ async function generarLinkPago({ items, referencia, telefono, nombreCliente, dir
     }
 
     const body = JSON.stringify({
-      successUrl: `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/pago/exitoso`,
-      cancelUrl: `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/pago/cancelado`,
+      successUrl: `https://${DOMINIO_PUBLICO}/pago/exitoso`,
+      cancelUrl: `https://${DOMINIO_PUBLICO}/pago/cancelado`,
       customerEmail: billing.email,
       customerName: `${firstName} ${lastName}`,
       paymentMethodTypes: ["card"],
@@ -384,7 +404,7 @@ async function consultarEstatusPorSesion(sessionId, secretKey) {
 async function registrarWebhook(secretKey) {
   return new Promise((resolve, reject) => {
     const key = secretKey || process.env.NETPAY_SECRET_KEY;
-    const webhookUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/webhook/netpay`;
+    const webhookUrl = `https://${DOMINIO_PUBLICO}/webhook/netpay`;
 
     const body = JSON.stringify({ webhook: webhookUrl });
 
