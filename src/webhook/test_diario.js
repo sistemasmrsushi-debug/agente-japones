@@ -24,6 +24,7 @@ const router = express.Router();
 const logger = require("../utils/logger");
 const db = require("../db/database");
 const { crearPedidoManualYGenerarLink } = require("./whatsapp");
+const { consultarEstatusPorSesion } = require("../utils/netpay");
 
 const NOMBRE_SUCURSAL_PRUEBA = "Sucursal de Prueba";
 
@@ -114,6 +115,30 @@ router.get("/test-diario/limpiar", async (req, res) => {
     res.json({ ok: true });
   } catch (error) {
     logger.error("Error en /test-diario/limpiar: " + error.message);
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// NUEVO (07-oct-2026, pedido por Diego): endpoint de diagnostico de SOLO
+// LECTURA para probar consultarEstatusPorSesion() (la consulta que hace el
+// respaldo automatico de pago -- ver src/utils/pago_respaldo.js) contra una
+// sesion real de Netpay, SIN tener que esperar a que un webhook falle de
+// verdad y sin modificar nada (no toca la base de datos ni marca ningun
+// pedido como pagado -- eso solo lo hace pago_respaldo.js). Sirve para
+// confirmar de una vez cual de las rutas candidatas es la correcta, usando
+// el sessionId/id/referencia de un pago que YA sabemos que se completo
+// (por ejemplo, de los logs de Railway).
+router.get("/test-diario/consultar-respaldo", async (req, res) => {
+  if (!validarToken(req, res)) return;
+  try {
+    const { sessionId, checkoutId, referencia } = req.query;
+    if (!sessionId && !checkoutId && !referencia) {
+      return res.status(400).json({ ok: false, error: "Manda al menos uno de: sessionId, checkoutId, referencia." });
+    }
+    const resultado = await consultarEstatusPorSesion(sessionId, checkoutId, referencia);
+    res.json({ ok: true, resultado });
+  } catch (error) {
+    logger.error("Error en /test-diario/consultar-respaldo: " + error.message);
     res.status(500).json({ ok: false, error: error.message });
   }
 });
