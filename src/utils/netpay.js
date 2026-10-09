@@ -446,6 +446,90 @@ async function consultarEstatusPorSesion(sessionId, checkoutId, merchantRefCode,
   };
 }
 
+// ── REEMBOLSAR UNA TRANSACCION ────────────────────────────────────────────────
+// NUEVO (09-oct-2026, pedido por Diego): antes no habia forma de reembolsar
+// un pago desde el sistema -- Diego reporto que tampoco se puede hacer a
+// mano desde el panel/manager de Netpay, asi que hacia falta este endpoint.
+//
+// Encontrado en la referencia oficial de Netpay (docs.netpay.com.mx/reference),
+// dentro de "Netpay Checkout Hosted" (el mismo producto que ya usamos para
+// generar el link de pago): esta documentado con el titulo "Cancelar
+// Transaccion", pero la ruta termina en "/refund" y el parametro que pide es
+// el "Id de transaccion PROCESADA" -- es decir, el transactionId que llega
+// por el webhook de pago (sessionLink.paid), no el sessionId/checkoutId que
+// se genera antes de pagar. Eso indica que es un reembolso real sobre una
+// transaccion ya cobrada, no una cancelacion de un link sin pagar.
+//
+// OJO: la documentacion de Netpay NO muestra el formato del cuerpo de la
+// peticion ni de la respuesta -- solo el metodo (POST), la ruta, y tres
+// codigos de status (200, 404, 409), sin explicar que significa cada uno.
+// Por eso esta funcion es conservadora: antes de usarse con dinero real hay
+// que probarla en sandbox con una transaccion de prueba y confirmar que el
+// 200 de verdad corresponde a un reembolso exitoso. Si en la practica Netpay
+// regresa otro formato (como ya paso con el webhook de pago rechazado, que
+// trae nombres de campo distintos segun el caso), raw queda disponible para
+// depurar sin tener que adivinar a ciegas.
+async function reembolsarTransaccion(transactionId, secretKey) {
+  return new Promise((resolve) => {
+    const key = secretKey || process.env.NETPAY_SECRET_KEY;
+
+    if (!key) {
+      logger.error("NETPAY_SECRET_KEY no esta configurada");
+      return resolve({ exito: false, error: "Falta configurar NETPAY_SECRET_KEY" });
+    }
+    if (!transactionId) {
+      return resolve({ exito: false, error: "Falta el transactionId de Netpay para poder reembolsar" });
+    }
+
+    const options = {
+      hostname: getHostname(),
+      path: `/gateway-ecommerce/v3/transactions/${encodeURIComponent(transactionId)}/refund`,
+      method: "POST",
+      timeout: 15000, // un reembolso puede tardar un poco mas que una simple consulta
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": key,
+        "Content-Length": 0,
+      },
+    };
+
+    logger.info(`Solicitando reembolso a Netpay -> hostname: ${getHostname()}, transactionId: ${transactionId}`);
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", chunk => data += chunk);
+      res.on("end", () => {
+        logger.info(`Respuesta Netpay refund -> status: ${res.statusCode}, body: ${data.substring(0, 300)}`);
+        let json = null;
+        try { json = data ? JSON.parse(data) : null; } catch (e) { /* algunas respuestas pueden venir vacias o no-JSON */ }
+
+        if (res.statusCode === 200) {
+          resolve({ exito: true, raw: json });
+        } else if (res.statusCode === 404) {
+          resolve({ exito: false, error: "Netpay no encontro esa transaccion (transactionId incorrecto o de otro ambiente, ej. sandbox vs produccion)", statusCode: 404, raw: json });
+        } else if (res.statusCode === 409) {
+          resolve({ exito: false, error: "Netpay rechazo el reembolso por conflicto -- probablemente ya fue reembolsada antes, o ya no se puede reembolsar (revisar directamente en el panel de Netpay)", statusCode: 409, raw: json });
+        } else {
+          resolve({ exito: false, error: (json && (json.message || json.error)) || `Netpay respondio ${res.statusCode}`, statusCode: res.statusCode, raw: json });
+        }
+      });
+    });
+
+    req.on("timeout", () => {
+      logger.error("Timeout conectando con Netpay para reembolso (15s)");
+      req.destroy();
+      resolve({ exito: false, error: "Timeout conectando con Netpay" });
+    });
+
+    req.on("error", (e) => {
+      logger.error("Error conectando con Netpay para reembolso: " + e.message);
+      resolve({ exito: false, error: e.message });
+    });
+
+    req.end();
+  });
+}
+
 // ── REGISTRAR URL DE WEBHOOK ──────────────────────────────────────────────────
 // Se ejecuta UNA SOLA VEZ para dar de alta la URL donde Netpay mandara las notificaciones
 async function registrarWebhook(secretKey) {
@@ -485,4 +569,4 @@ async function registrarWebhook(secretKey) {
   });
 }
 
-module.exports = { generarLinkPago, consultarEstatusTransaccion, consultarEstatusPorSesion, registrarWebhook };
+module.exports = { generarLinkPago, consultarEstatusTransaccion, consultarEstatusPorSesion, registrarWebhook, reembolsarTransaccion };

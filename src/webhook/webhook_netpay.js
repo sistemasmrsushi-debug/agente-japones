@@ -103,6 +103,14 @@ router.post("/webhook/netpay", async (req, res) => {
           await db.marcarPedidoPagado(referenciaPedido);
           logger.info(`Pedido ${referenciaPedido} marcado como pagado`);
 
+          // NUEVO (09-oct-2026, pedido por Diego): guardar el transactionId
+          // real (y los ultimos 4 digitos) para poder reembolsar este pedido
+          // mas adelante desde el dashboard -- este es el UNICO momento en
+          // que Netpay nos manda el transactionId, por eso se guarda aqui y
+          // no se recalcula despues. Ver guardarTransaccionNetpay en
+          // database.js y reembolsarTransaccion en utils/netpay.js.
+          await db.guardarTransaccionNetpay(referenciaPedido, transactionId, lastFourDigits);
+
           // CORREGIDO (26-ago-2026, reportado por Diego en una prueba real):
           // ya NO se despacha a Uber Direct aqui. Antes el repartidor se
           // buscaba en cuanto se confirmaba el pago, sin esperar a que la

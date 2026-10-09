@@ -87,6 +87,20 @@ async function initDB() {
     // que la API espere este id numerico en su lugar. Se guarda por separado
     // para poder usarlo (y para depurar a mano por SQL si hace falta).
     await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS netpay_checkout_id TEXT;`);
+    // NUEVO (09-oct-2026, pedido por Diego): guardar el transactionId REAL de
+    // Netpay (el que llega en el webhook "sessionLink.paid", distinto del
+    // sessionId/checkoutId de arriba, que solo existen desde ANTES de pagar).
+    // Antes este dato nunca se guardaba -- solo vivia un instante dentro del
+    // webhook -- asi que no habia forma de reembolsar un pedido despues sin
+    // ir a buscar el transactionId a mano en el panel de Netpay. Tambien se
+    // guardan los ultimos 4 digitos (ya se le mandaban al cliente por
+    // WhatsApp, pero no se guardaban) para poder mostrarlos en el dashboard
+    // al momento de decidir un reembolso. reembolsado_en queda NULL hasta
+    // que se reembolsa de verdad (ver reembolsarTransaccion en netpay.js y
+    // el boton "Reembolsar" del dashboard).
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS netpay_transaction_id TEXT;`);
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS netpay_last_four TEXT;`);
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS reembolsado_en TIMESTAMPTZ;`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS reservaciones (
         id TEXT PRIMARY KEY,
@@ -351,6 +365,33 @@ async function guardarSessionNetpay(id, sessionId, checkoutId) {
 async function marcarPedidoPagado(id) {
   const { rows } = await pool.query(
     "UPDATE pedidos SET estado='pendiente', pago_confirmado_en=NOW(), actualizado=NOW() WHERE id=$1 RETURNING *",
+    [id]
+  );
+  return rows[0] || null;
+}
+
+// NUEVO (09-oct-2026, pedido por Diego): guarda el transactionId real de
+// Netpay (y los ultimos 4 digitos de la tarjeta) para un pedido ya pagado.
+// Se llama justo despues de marcarPedidoPagado(), en el webhook
+// "sessionLink.paid" -- es el UNICO momento en que Netpay nos manda estos
+// datos. Sin esto guardado no hay forma de reembolsar el pedido mas
+// adelante (el endpoint de reembolso de Netpay pide este transactionId).
+async function guardarTransaccionNetpay(id, transactionId, lastFourDigits) {
+  if (!transactionId) return;
+  await pool.query(
+    "UPDATE pedidos SET netpay_transaction_id=$1, netpay_last_four=$2 WHERE id=$3",
+    [transactionId, lastFourDigits || null, id]
+  );
+}
+
+// Marca un pedido como reembolsado DESPUES de que Netpay confirmo el
+// reembolso (ver reembolsarTransaccion en src/utils/netpay.js). No cambia
+// "estado" a proposito -- el reembolso es independiente del flujo de
+// cocina/entrega (un pedido ya "listo" o "cancelado" tambien se puede
+// reembolsar), asi que se deja como una marca aparte.
+async function marcarPedidoReembolsado(id) {
+  const { rows } = await pool.query(
+    "UPDATE pedidos SET reembolsado_en=NOW(), actualizado=NOW() WHERE id=$1 RETURNING *",
     [id]
   );
   return rows[0] || null;
@@ -922,6 +963,8 @@ module.exports = {
   actualizarEstadoPedido,
   marcarPedidoPagado,
   guardarSessionNetpay,
+  guardarTransaccionNetpay,
+  marcarPedidoReembolsado,
   actualizarGPSPedido,
   guardarClienteDireccion,
   obtenerClientePorTelefono,

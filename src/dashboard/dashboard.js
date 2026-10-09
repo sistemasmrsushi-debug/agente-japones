@@ -19,6 +19,11 @@ const { notificarDueno } = require("../utils/alertas");
 // whatsapp.js), para que Diego pueda mandarle un link nuevo al cliente
 // desde el dashboard cuando le llega la alerta de que fallo Netpay.
 const { reenviarLinkPago, crearPedidoManualYGenerarLink } = require("../webhook/whatsapp");
+// NUEVO (09-oct-2026, pedido por Diego): boton "Reembolsar" -- Diego reporto
+// que no se puede reembolsar a mano desde el panel/manager de Netpay, asi
+// que hacia falta poder hacerlo desde aqui. Ver el comentario largo junto a
+// reembolsarTransaccion en utils/netpay.js para el detalle del endpoint.
+const { reembolsarTransaccion } = require("../utils/netpay");
 // NUEVO (25-sep-2026, pedido por Diego): reporte financiero/operativo
 // descargable en Excel (ventas, cupones/descuentos, quejas, reservaciones).
 const { generarReporteExcel } = require("../utils/reportes");
@@ -267,6 +272,89 @@ router.post("/api/pedidos/:id/reenviar-link", requireAuth, bloquearSoloLectura, 
     }
   } catch (err) {
     logger.error("Error reenviando link de pago: " + err.message);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// NUEVO (07-oct-2026, pedido por Diego): boton "Solicitar otro repartidor"
+// para cuando Uber Direct no pudo completar una entrega (estatus "canceled"
+// o "returned", ver src/webhook/webhook_uber.js) o cuando el despacho
+// inicial fallo por completo (nunca se asigno repartidor). Antes no habia
+// ninguna forma de volver a intentar el despacho desde el dashboard -- el
+// comentario viejo en este mismo archivo decia literalmente "hay que
+// gestionarlo manualmente" sin dar una forma de hacerlo. Reusa
+// despacharUberDirect(), la misma funcion del despacho automatico -- crea
+// una entrega NUEVA de Uber Direct (cotizacion + creacion) y sobrescribe
+// uber_delivery_id/uber_estado/uber_tracking_url del pedido.
+router.post("/api/pedidos/:id/reenviar-repartidor", requireAuth, bloquearSoloLectura, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const pedido = await db.obtenerPedidoPorId(id);
+    if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    if (pedido.tipo !== "domicilio") {
+      return res.status(400).json({ error: "Este pedido no es a domicilio -- no aplica un repartidor" });
+    }
+    if (!["en_proceso", "listo"].includes(pedido.estado)) {
+      return res.status(400).json({ error: "Este pedido no está en un estado donde tenga sentido mandar un repartidor" });
+    }
+
+    const resultadoUber = await despacharUberDirect(pedido);
+    if (resultadoUber.exito) {
+      if (resultadoUber.trackingUrl && pedido.telefono_cliente) {
+        await notificarCliente(
+          pedido.telefono_cliente,
+          `🛵 Ya estamos buscando un nuevo repartidor para tu pedido. Puedes seguirlo aquí:\n${resultadoUber.trackingUrl}`
+        );
+      }
+      res.json({ ok: true, trackingUrl: resultadoUber.trackingUrl || null });
+    } else {
+      logger.warn(`Pedido ${id}: se intento mandar otro repartidor pero el despacho a Uber Direct volvio a fallar.`);
+      notificarDueno(`🔴 Uber Direct volvió a fallar al intentar mandar otro repartidor.\n\nPedido: ${id}\nCliente: ${(pedido.telefono_cliente || "").replace("whatsapp:", "")}\nSucursal: ${pedido.sucursal}\nDirección: ${pedido.direccion || "—"}\n\nEsta vez hay que gestionarlo totalmente fuera del sistema (repartidor propio, u otra plataforma).`);
+      res.status(502).json({ error: "No se pudo despachar un nuevo repartidor -- revisa los logs o intenta de nuevo en unos minutos" });
+    }
+  } catch (err) {
+    logger.error("Error reenviando repartidor: " + err.message);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// NUEVO (09-oct-2026, pedido por Diego): boton "Reembolsar" en el dashboard.
+// Solo "gerente" puede usarlo (igual que /api/sesiones-activas) -- es dinero
+// real saliendo, asi que se restringe mas que las demas acciones (que solo
+// bloquean al rol "administrativo" de solo lectura). TODO: por ahora esto se
+// probo contra el ambiente de SANDBOX de Netpay -- antes de confiar en esto
+// con pagos reales de produccion, hay que confirmar con una transaccion de
+// prueba que el 200 de Netpay de verdad regresa el dinero (su documentacion
+// no lo aclara, ver el comentario en utils/netpay.js).
+router.post("/api/pedidos/:id/reembolsar", requireGerente, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const pedido = await db.obtenerPedidoPorId(id);
+    if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    if (!pedido.netpay_transaction_id) {
+      return res.status(400).json({ error: "Este pedido no tiene una transacción de Netpay asociada -- puede ser un pedido anterior a esta función, o uno que nunca se pagó por este medio. Revisa manualmente." });
+    }
+    if (pedido.reembolsado_en) {
+      return res.status(400).json({ error: `Este pedido ya fue reembolsado el ${new Date(pedido.reembolsado_en).toLocaleString("es-MX")}.` });
+    }
+
+    const resultado = await reembolsarTransaccion(pedido.netpay_transaction_id);
+    if (resultado.exito) {
+      await db.marcarPedidoReembolsado(id);
+      logger.info(`Pedido ${id} reembolsado por ${req.sesion.usuario} (transactionId=${pedido.netpay_transaction_id})`);
+      if (pedido.telefono_cliente) {
+        await notificarCliente(
+          pedido.telefono_cliente,
+          `💸 Tu pedido ${id} fue reembolsado. El dinero puede tardar unos días hábiles en reflejarse en tu tarjeta, dependiendo de tu banco.`
+        );
+      }
+      res.json({ ok: true });
+    } else {
+      logger.warn(`Pedido ${id}: fallo el reembolso en Netpay -- ${resultado.error}`);
+      res.status(502).json({ error: resultado.error || "Netpay no pudo procesar el reembolso" });
+    }
+  } catch (err) {
+    logger.error("Error reembolsando pedido: " + err.message);
     res.status(500).json({ error: "Error interno" });
   }
 });

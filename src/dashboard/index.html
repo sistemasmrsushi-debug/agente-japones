@@ -81,6 +81,9 @@ tr:hover td{background:var(--gris1)}
 .btn-accion.verde:hover{background:var(--verde);border-color:var(--verde);color:var(--blanco)}
 .btn-accion.rojo:hover{background:var(--rojo);border-color:var(--rojo);color:var(--blanco)}
 .btn-accion.azul:hover{background:#1A6FA8;border-color:#1A6FA8;color:var(--blanco)}
+.btn-accion.naranja:hover{background:var(--naranja);border-color:var(--naranja);color:var(--blanco)}
+.btn-accion.rojo{border-color:var(--rojo);color:var(--rojo)}
+.btn-accion.rojo:hover{background:var(--rojo);border-color:var(--rojo);color:var(--blanco)}
 .vacio{text-align:center;padding:3rem;color:var(--muted);font-size:0.75rem}
 .fila-grupo td{background:var(--gris1);color:var(--turquesa);font-size:0.62rem;letter-spacing:0.14em;text-transform:uppercase;padding:0.5rem 0.9rem;font-weight:600;border-bottom:1px solid var(--borde)}
 .sucursales-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1px;background:var(--borde);margin-bottom:1.5rem}
@@ -195,7 +198,7 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
     </div>
     <div class="panel" id="panel-linkmanual">
       <div class="conectividad-titulo" style="margin-bottom:0.8rem">
-        Registra un pedido a domicilio que tomaste directamente (llamada, cliente en mostrador, etc.). Al generar el link, el sistema se lo manda automáticamente al cliente por WhatsApp (desde el número del negocio) y el pedido queda en "Pendiente de pago" -- la cocina no puede aceptarlo ni prepararlo hasta que el cliente pague y Netpay lo confirme.
+        Registra un pedido a domicilio que tomaste directamente (llamada, cliente en mostrador, etc.) y genera su link de pago de Netpay. Cópialo y mándaselo al cliente tú mismo (por WhatsApp personal, SMS, o leyéndoselo) -- el sistema no se lo puede mandar automático porque ese cliente nunca le ha escrito al bot. El pedido queda en "Pendiente de pago" -- la cocina no puede aceptarlo ni prepararlo hasta que el cliente pague y Netpay lo confirme.
       </div>
       <div class="admin-form">
         <select class="admin-input admin-input-sm" id="lm-sucursal" style="display:none"></select>
@@ -222,7 +225,7 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
       <button class="btn-guardar" onclick="generarLinkManual()">Generar link de pago</button>
       <div class="admin-msg" id="lm-msg"></div>
       <div id="lm-resultado" style="display:none;margin-top:1rem;padding:1rem;border:1px solid var(--borde);background:var(--gris1)">
-        <div style="font-size:0.65rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:0.5rem">✅ Pedido registrado y link enviado al cliente por WhatsApp -- queda en "Pendiente de pago"</div>
+        <div style="font-size:0.65rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:0.5rem">✅ Link generado -- cópialo y mándaselo al cliente</div>
         <div style="display:flex;gap:0.5rem;align-items:center">
           <input class="admin-input" id="lm-link-generado" readonly style="flex:1;font-family:'DM Mono',monospace;font-size:0.7rem">
           <button class="btn-guardar" onclick="copiarLinkManual()">Copiar</button>
@@ -588,6 +591,33 @@ function filaP(p) {
   ` : p.estado==='pendiente_pago' && p.tipo==='domicilio' ? `
     <button class="btn-accion azul" onclick="reenviarLink('${p.id}', this)">🔁 Reenviar link</button>
   ` : '');
+  // NUEVO (07-oct-2026, pedido por Diego): boton "Solicitar otro repartidor"
+  // -- aparece aparte de "acciones" (puede coexistir con "✓ Pedido listo" o
+  // con el badge de "Completado") cuando: el pedido es a domicilio, ya lo
+  // acepto la cocina (en_proceso o listo), y o nunca se le asigno repartidor
+  // (uber_delivery_id vacio -- el despacho inicial fallo) o el repartidor
+  // que tenia ya no va a completar la entrega (uber_estado "canceled" o
+  // "returned", ver webhook_uber.js). Antes no habia ninguna forma de volver
+  // a intentar esto desde el dashboard.
+  const fallaRepartidor = p.tipo==='domicilio' && ['en_proceso','listo'].includes(p.estado)
+    && (!p.uber_delivery_id || ['canceled','returned'].includes(p.uber_estado));
+  const botonRepartidor = (!soloLectura && fallaRepartidor)
+    ? `<button class="btn-accion naranja" onclick="solicitarRepartidor('${p.id}', this)">🛵 Solicitar otro repartidor</button>`
+    : '';
+  // NUEVO (09-oct-2026, pedido por Diego: "no podemos hacer reembolsos
+  // manuales desde el manager de Netpay"): boton "Reembolsar" -- solo para
+  // el rol gerente (el servidor tambien lo exige, requireGerente en
+  // dashboard.js, esto solo evita que el boton aparezca para los demas
+  // roles). Solo aparece si el pedido tiene un transactionId de Netpay
+  // guardado (pedidos de antes de esta funcion no lo tienen) y todavia no
+  // se ha reembolsado. No depende del estado del pedido -- un pedido ya
+  // "listo" o "cancelado" tambien puede necesitar reembolso despues.
+  const botonReembolso = (esGerente && p.netpay_transaction_id && !p.reembolsado_en)
+    ? `<button class="btn-accion rojo" onclick="reembolsarPedido('${p.id}', this)">💸 Reembolsar</button>`
+    : '';
+  const avisoReembolsado = p.reembolsado_en
+    ? `<div style="font-size:0.6rem;color:var(--rojo);margin-top:0.2rem">💸 Reembolsado</div>`
+    : '';
   const tipo = p.tipo==='domicilio' ? '🚚 Domicilio' : '🏪 Sucursal';
   // Telefono como link de llamada
   const telLimpio = (p.telefono_cliente||'').replace('whatsapp:','');
@@ -609,9 +639,9 @@ function filaP(p) {
     <td>${items}${direccionHtml}</td>
     <td>${p.sucursal||'—'}</td>
     <td style="font-size:0.7rem">${tipo}</td>
-    <td style="color:var(--turquesa)">${total!=='—'?'$'+total+' MXN':'—'}${descuento>0?`<div style="font-size:0.6rem;color:var(--verde)">🎟️ ${p.cupon_codigo} (-$${descuento})</div>`:''}</td>
+    <td style="color:var(--turquesa)">${total!=='—'?'$'+total+' MXN':'—'}${descuento>0?`<div style="font-size:0.6rem;color:var(--verde)">🎟️ ${p.cupon_codigo} (-$${descuento})</div>`:''}${avisoReembolsado}</td>
     <td><span class="badge ${p.estado}">${p.estado.replace('_',' ')}</span></td>
-    <td><div class="acciones">${acciones}</div></td>
+    <td><div class="acciones">${acciones}${botonRepartidor}${botonReembolso}</div></td>
   </tr>`;
 }
 
@@ -867,6 +897,54 @@ async function reenviarLink(id, btn) {
   } catch (e) {
     btn.textContent = '❌ Error de conexión';
     setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 4000);
+  }
+}
+
+// NUEVO (07-oct-2026, pedido por Diego): boton "Solicitar otro repartidor"
+// -- mismo patron de feedback que reenviarLink() de arriba (el texto del
+// boton se usa como mensaje de exito/error, no hay un panel aparte).
+async function solicitarRepartidor(id, btn) {
+  const textoOriginal = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Buscando...';
+  try {
+    const r = await fetchAuth(`/api/pedidos/${id}/reenviar-repartidor`, {method:'POST'});
+    const data = await r.json();
+    if (!r.ok) {
+      btn.textContent = '❌ ' + (data.error || 'Error');
+      setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 5000);
+      return;
+    }
+    btn.textContent = '✅ Repartidor en camino';
+    setTimeout(() => cargarDatos(), 3000);
+  } catch (e) {
+    btn.textContent = '❌ Error de conexión';
+    setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 5000);
+  }
+}
+
+// NUEVO (09-oct-2026, pedido por Diego): boton "Reembolsar". A diferencia de
+// los demas botones de accion, este SI pide confirmacion -- es dinero real
+// saliendo y no se puede deshacer desde aqui, asi que vale la pena el paso
+// extra para evitar un click accidental.
+async function reembolsarPedido(id, btn) {
+  if (!confirm(`¿Reembolsar el pedido ${id}? Esta acción no se puede deshacer desde el dashboard.`)) return;
+  const textoOriginal = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Reembolsando...';
+  try {
+    const r = await fetchAuth(`/api/pedidos/${id}/reembolsar`, {method:'POST'});
+    const data = await r.json();
+    if (!r.ok) {
+      btn.textContent = '❌ ' + (data.error || 'Error');
+      setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 6000);
+      return;
+    }
+    btn.textContent = '✅ Reembolsado';
+    setTimeout(() => cargarDatos(), 2000);
+  } catch (e) {
+    btn.textContent = '❌ Error de conexión';
+    setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 6000);
   }
 }
 
