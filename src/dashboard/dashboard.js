@@ -24,6 +24,15 @@ const { reenviarLinkPago, crearPedidoManualYGenerarLink } = require("../webhook/
 // que hacia falta poder hacerlo desde aqui. Ver el comentario largo junto a
 // reembolsarTransaccion en utils/netpay.js para el detalle del endpoint.
 const { reembolsarTransaccion } = require("../utils/netpay");
+// NUEVO (12-oct-2026, pedido por Diego: "sigo sin poder saber si mi agente
+// esta funcionando, no tengo un mensaje que me diga que todo bien"): boton
+// "Probar sistema ahora" -- la prueba diaria automatica (prueba_diaria.js)
+// ya existia, pero solo corre una vez al dia a las 8am y el resultado solo
+// llega por WhatsApp (que depende de TELEFONO_DUENO estar bien configurado
+// en Railway). Esto deja a Diego probar en cualquier momento Y ver el
+// resultado directo en el dashboard, sin tener que esperar ni depender de
+// que el WhatsApp le llegue.
+const { ejecutarPruebaDiaria } = require("../utils/prueba_diaria");
 // NUEVO (25-sep-2026, pedido por Diego): reporte financiero/operativo
 // descargable en Excel (ventas, cupones/descuentos, quejas, reservaciones).
 const { generarReporteExcel } = require("../utils/reportes");
@@ -379,6 +388,23 @@ router.get("/api/stats", requireAuth, async (req, res) => {
   } catch (err) {
     logger.error("Error obteniendo stats: " + err.message);
     res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// NUEVO (12-oct-2026, pedido por Diego): correr la prueba diaria de salud
+// del sistema (BD, Netpay, registro del webhook) bajo demanda, y regresar
+// el detalle para mostrarlo directo en el dashboard -- no solo por WhatsApp,
+// que es donde se perdia si TELEFONO_DUENO no estaba configurado. Solo
+// gerente, igual que /api/sesiones-activas, porque toca credenciales de
+// Netpay (genera una sesion de pago de prueba real, aunque de $1 y nunca
+// pagada).
+router.post("/api/sistema/probar", requireGerente, async (req, res) => {
+  try {
+    const resultado = await ejecutarPruebaDiaria();
+    res.json(resultado);
+  } catch (err) {
+    logger.error("Error ejecutando prueba de sistema bajo demanda: " + err.message);
+    res.status(500).json({ error: "Error interno al correr la prueba" });
   }
 });
 

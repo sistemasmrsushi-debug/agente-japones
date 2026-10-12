@@ -102,6 +102,8 @@ tr:hover td{background:var(--gris1)}
 .sc-lbl{font-size:0.55rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted)}
 .alerta-banner{position:fixed;top:0;left:0;right:0;z-index:999;background:var(--turquesa);color:var(--blanco);padding:0.7rem 1.5rem;font-size:0.8rem;display:none;align-items:center;justify-content:space-between;transition:background 0.3s}
 .alerta-banner.urgente{background:var(--rojo)}
+.sistema-banner{position:fixed;top:0;left:0;right:0;z-index:1000;background:var(--verde);color:var(--blanco);padding:0.8rem 1.5rem;font-size:0.72rem;line-height:1.5;white-space:pre-line;display:none;align-items:flex-start;justify-content:space-between;gap:1rem}
+.sistema-banner.falla{background:var(--rojo)}
 .fila-urgente{background:rgba(192,57,43,0.1) !important}
 .fila-urgente td:first-child{border-left:3px solid var(--rojo)}
 .alerta-close{background:none;border:none;color:var(--blanco);cursor:pointer;font-size:1.2rem}
@@ -131,6 +133,11 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
   <button class="alerta-close" onclick="cerrarAlerta()">×</button>
 </div>
 
+<div class="sistema-banner" id="sistema-banner">
+  <span id="sistema-texto"></span>
+  <button class="alerta-close" onclick="cerrarBannerSistema()">×</button>
+</div>
+
 <div id="login-screen">
   <div class="login-box">
     <div class="login-logo"><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/280px-PNG_transparency_demonstration_1.png" alt="Mr. Sushi" onerror="this.style.display='none'"></div>
@@ -157,6 +164,7 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
     <div class="header-right">
       <span class="header-time" id="reloj"></span>
       <button class="logout-btn" id="btn-sonido" onclick="activarSonido()" style="border-color:var(--naranja);color:var(--naranja)">🔔 Activar sonido</button>
+      <button class="logout-btn" id="btn-probar-sistema" onclick="probarSistema(this)" style="display:none;border-color:var(--turquesa);color:var(--turquesa)">🔎 Probar sistema</button>
       <button class="logout-btn" onclick="logout()">Salir</button>
     </div>
   </div>
@@ -417,6 +425,7 @@ async function login() {
       sesion.sucursal;
     if (sesion.rol==='gerente') document.getElementById('tab-gerente').style.display='inline-block';
     if (sesion.rol==='gerente') document.getElementById('tab-admin').style.display='inline-block';
+    if (sesion.rol==='gerente') document.getElementById('btn-probar-sistema').style.display='inline-block';
     if (sesion.rol==='gerente' || sesion.rol==='administrativo') document.getElementById('tab-reportes').style.display='inline-block';
     // El rol "administrativo" solo debe ver Pedidos + Reportes -- nada de
     // Quejas ni Reservaciones (asi lo pidio Diego).
@@ -957,6 +966,47 @@ function mostrarAlerta(texto, urgente = false) {
   // NO se cierra sola — solo se cierra al aceptar el pedido
 }
 function cerrarAlerta() { document.getElementById('alerta-banner').style.display='none'; }
+
+// NUEVO (12-oct-2026, pedido por Diego: "no tengo un mensaje que me diga
+// que todo bien, me preocupa eso"): corre la prueba de salud del sistema
+// (BD, Netpay, webhook) al instante y muestra el resultado AQUI en el
+// dashboard -- no solo por WhatsApp, que es donde se perdia si
+// TELEFONO_DUENO nunca se configuro en Railway. Si ese es el problema, el
+// propio resultado lo dice explicitamente en vez de dejar a Diego
+// adivinando por que nunca le llega nada.
+async function probarSistema(btn) {
+  const textoOriginal = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Probando...';
+  try {
+    const r = await fetchAuth('/api/sistema/probar', {method:'POST'});
+    const data = await r.json();
+    btn.disabled = false;
+    btn.textContent = textoOriginal;
+    if (!r.ok) {
+      mostrarBannerSistema(`❌ No se pudo correr la prueba: ${data.error || 'error desconocido'}`, true);
+      return;
+    }
+    const linea = (nombre, chk) => `${chk.ok ? '✅' : '❌'} ${nombre}${chk.ok ? '' : ` -- ${chk.detalle}`}`;
+    let texto = `${data.ok ? '✅ Todo funcionando normal.' : '⚠️ Hay un problema:'}\n`
+      + `${linea('Base de datos', data.bd)}\n${linea('Netpay (generar link)', data.netpay)}\n${linea('Webhook de Netpay', data.webhook)}`;
+    if (!data.whatsappConfigurado) {
+      texto += `\n\n📵 Este resultado NO se mandó por WhatsApp porque TELEFONO_DUENO no está configurado en Railway (Variables) -- por eso nunca te llega el aviso diario, aunque el sistema sí esté corriendo la prueba.`;
+    }
+    mostrarBannerSistema(texto, !data.ok || !data.whatsappConfigurado);
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = textoOriginal;
+    mostrarBannerSistema('❌ Error de conexión al correr la prueba.', true);
+  }
+}
+function mostrarBannerSistema(texto, falla) {
+  const banner = document.getElementById('sistema-banner');
+  document.getElementById('sistema-texto').textContent = texto;
+  banner.classList.toggle('falla', !!falla);
+  banner.style.display = 'flex';
+}
+function cerrarBannerSistema() { document.getElementById('sistema-banner').style.display='none'; }
 
 // ==================== PANEL DE ADMINISTRACIÓN ====================
 // Solo visible y funcional para el rol "gerente". Los endpoints /api/admin/*
