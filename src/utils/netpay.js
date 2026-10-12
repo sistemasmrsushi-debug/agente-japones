@@ -543,6 +543,16 @@ async function registrarWebhook(secretKey) {
       hostname: "gateway-154.netpaydev.com",
       path: "/gateway-ecommerce/v3/webhooks/",
       method: "PUT",
+      // NUEVO (12-oct-2026, reportado por Diego: el boton "Probar sistema"
+      // del dashboard se quedaba en "Error de conexión" sin explicar nada):
+      // esta era la UNICA llamada a Netpay en todo netpay.js sin un timeout
+      // configurado -- si Netpay tardaba o se quedaba callado, esta
+      // peticion podia colgarse indefinidamente, y como se llama tanto al
+      // arrancar el servidor como dentro de la prueba diaria
+      // (prueba_diaria.js), un cuelgue aqui podia tumbar esa prueba
+      // completa sin dar ningun error claro (el navegador terminaba
+      // recibiendo una respuesta cortada/invalida de Railway, no un JSON).
+      timeout: 10000,
       headers: {
         "Content-Type": "application/json",
         "Authorization": key,
@@ -557,6 +567,12 @@ async function registrarWebhook(secretKey) {
         logger.info(`Webhook registrado en Netpay: ${webhookUrl} -> Status ${res.statusCode}`);
         resolve({ statusCode: res.statusCode, data });
       });
+    });
+
+    req.on("timeout", () => {
+      logger.error("Timeout conectando con Netpay para registrar webhook (10s)");
+      req.destroy();
+      reject(new Error("Timeout conectando con Netpay para registrar webhook"));
     });
 
     req.on("error", (e) => {

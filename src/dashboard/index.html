@@ -978,27 +978,49 @@ async function probarSistema(btn) {
   const textoOriginal = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Probando...';
+
+  // CORREGIDO (12-oct-2026, reportado por Diego: el boton solo mostraba
+  // "Error de conexion" sin ningun detalle): antes un solo try/catch
+  // mezclaba dos casos muy distintos -- 1) el navegador de plano no pudo
+  // conectar (fetch truena) y 2) SI hubo respuesta del servidor, pero no era
+  // JSON valido (ej. una pagina de error HTML de Railway por timeout, o un
+  // "Cannot POST" porque el ultimo deploy no tomo). El segundo caso es el
+  // mas probable y antes se reportaba exactamente igual que el primero, sin
+  // dar ninguna pista de que estaba pasando de verdad.
+  let r;
   try {
-    const r = await fetchAuth('/api/sistema/probar', {method:'POST'});
-    const data = await r.json();
-    btn.disabled = false;
-    btn.textContent = textoOriginal;
-    if (!r.ok) {
-      mostrarBannerSistema(`❌ No se pudo correr la prueba: ${data.error || 'error desconocido'}`, true);
-      return;
-    }
-    const linea = (nombre, chk) => `${chk.ok ? '✅' : '❌'} ${nombre}${chk.ok ? '' : ` -- ${chk.detalle}`}`;
-    let texto = `${data.ok ? '✅ Todo funcionando normal.' : '⚠️ Hay un problema:'}\n`
-      + `${linea('Base de datos', data.bd)}\n${linea('Netpay (generar link)', data.netpay)}\n${linea('Webhook de Netpay', data.webhook)}`;
-    if (!data.whatsappConfigurado) {
-      texto += `\n\n📵 Este resultado NO se mandó por WhatsApp porque TELEFONO_DUENO no está configurado en Railway (Variables) -- por eso nunca te llega el aviso diario, aunque el sistema sí esté corriendo la prueba.`;
-    }
-    mostrarBannerSistema(texto, !data.ok || !data.whatsappConfigurado);
+    r = await fetchAuth('/api/sistema/probar', {method:'POST'});
   } catch (e) {
     btn.disabled = false;
     btn.textContent = textoOriginal;
-    mostrarBannerSistema('❌ Error de conexión al correr la prueba.', true);
+    mostrarBannerSistema(`❌ El navegador no pudo conectar con el servidor (¿internet caído, o Railway caído?). Detalle: ${e.message}`, true);
+    return;
   }
+
+  btn.disabled = false;
+  btn.textContent = textoOriginal;
+
+  const textoCrudo = await r.text();
+  let data;
+  try {
+    data = JSON.parse(textoCrudo);
+  } catch (e) {
+    mostrarBannerSistema(`❌ El servidor respondió algo que no es JSON (status ${r.status}). Esto suele pasar si el último deploy no terminó, o si la prueba se quedó colgada (timeout) hablando con Netpay.\n\nRespuesta cruda: ${textoCrudo.substring(0,300) || '(vacía)'}`, true);
+    return;
+  }
+
+  if (!r.ok) {
+    mostrarBannerSistema(`❌ No se pudo correr la prueba (status ${r.status}): ${data.error || 'error desconocido'}`, true);
+    return;
+  }
+
+  const linea = (nombre, chk) => `${chk.ok ? '✅' : '❌'} ${nombre}${chk.ok ? '' : ` -- ${chk.detalle}`}`;
+  let texto = `${data.ok ? '✅ Todo funcionando normal.' : '⚠️ Hay un problema:'}\n`
+    + `${linea('Base de datos', data.bd)}\n${linea('Netpay (generar link)', data.netpay)}\n${linea('Webhook de Netpay', data.webhook)}`;
+  if (!data.whatsappConfigurado) {
+    texto += `\n\n📵 Este resultado NO se mandó por WhatsApp porque TELEFONO_DUENO no está configurado en Railway (Variables) -- por eso nunca te llega el aviso diario, aunque el sistema sí esté corriendo la prueba.`;
+  }
+  mostrarBannerSistema(texto, !data.ok || !data.whatsappConfigurado);
 }
 function mostrarBannerSistema(texto, falla) {
   const banner = document.getElementById('sistema-banner');
