@@ -1022,9 +1022,9 @@ async function probarSistema(btn) {
   // formateado (sin el "+") pasaba la prueba sin avisar nada. Ahora se usa
   // el resultado real del envío (whatsappEnviado/whatsappError).
   if (data.whatsappEnviado) {
-    texto += `\n\n📲 El aviso de WhatsApp sí se envió -- revisa tu teléfono.`;
+    texto += `\n\n📲 El aviso por SMS sí se envió -- revisa tu teléfono.`;
   } else {
-    texto += `\n\n📵 El aviso de WhatsApp NO se pudo enviar: ${data.whatsappError || 'razón desconocida'}.`;
+    texto += `\n\n📵 El aviso por SMS NO se pudo enviar: ${data.whatsappError || 'razón desconocida'}.`;
   }
   mostrarBannerSistema(texto, !data.ok || !data.whatsappEnviado);
 }
