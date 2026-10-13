@@ -95,22 +95,35 @@ async function ejecutarPruebaDiaria() {
 
   // NUEVO (12-oct-2026, pedido por Diego: "no tengo un mensaje que me diga
   // que todo bien, me preocupa eso"): antes esta funcion no regresaba nada
-  // -- solo mandaba el WhatsApp y ya. Si TELEFONO_DUENO nunca se configuro
-  // en Railway, notificarDueno() se queda callada (solo deja un warning en
-  // los logs de Railway, que Diego no ve), asi que la prueba podia llevar
-  // dias "funcionando" sin que el mensaje de "todo bien" le llegara nunca a
-  // Diego -- y el no tenia forma de saber si el problema era el sistema o
-  // solo el aviso. Ahora se regresa el detalle para que el boton "Probar
-  // sistema ahora" del dashboard (ver /api/sistema/probar en dashboard.js)
-  // pueda mostrarlo EN PANTALLA, sin depender de que el WhatsApp llegue.
-  const whatsappConfigurado = !!process.env.TELEFONO_DUENO;
-  if (!whatsappConfigurado) {
-    logger.warn("TELEFONO_DUENO no esta configurada -- la prueba diaria corre, pero el aviso de 'todo bien' por WhatsApp nunca se manda.");
+  // -- solo mandaba el WhatsApp y ya. Ahora se regresa el detalle para que
+  // el boton "Probar sistema ahora" del dashboard (ver /api/sistema/probar
+  // en dashboard.js) pueda mostrarlo EN PANTALLA, sin depender de que el
+  // WhatsApp llegue.
+  //
+  // CORREGIDO (13-oct-2026, caso real con Diego): la primera version de
+  // esto solo revisaba `!!process.env.TELEFONO_DUENO` (si la variable
+  // EXISTE), no si el envio de verdad funciono -- asi que cuando
+  // TELEFONO_DUENO estaba mal formateado (le faltaba el "+" que exige
+  // Twilio, ver normalizarWhatsapp en alertas.js) el boton decia que todo
+  // estaba bien, pero el WhatsApp nunca llegaba, sin ninguna pista de por
+  // que. Ahora se usa el resultado REAL de notificarDueno() (que ya
+  // regresa si se pudo enviar o no, y el error exacto de Twilio si fallo).
+  const resultadoWhatsapp = await notificarDueno(mensaje);
+  if (!resultadoWhatsapp.enviado) {
+    logger.warn("El aviso de 'todo bien' por WhatsApp no se pudo enviar: " + resultadoWhatsapp.error);
   }
 
-  await notificarDueno(mensaje);
-
-  return { ok: todoBien, bd, netpay, webhook, whatsappConfigurado, mensaje };
+  return {
+    ok: todoBien,
+    bd, netpay, webhook,
+    mensaje,
+    whatsappEnviado: resultadoWhatsapp.enviado,
+    whatsappError: resultadoWhatsapp.enviado ? null : resultadoWhatsapp.error,
+    // Se deja whatsappConfigurado por compatibilidad con cualquier cosa que
+    // ya lo estuviera leyendo -- pero whatsappEnviado es el dato que de
+    // verdad importa ahora.
+    whatsappConfigurado: !!process.env.TELEFONO_DUENO,
+  };
 }
 
 // Corre cada 10 min y dispara la prueba una sola vez al dia, cuando la hora

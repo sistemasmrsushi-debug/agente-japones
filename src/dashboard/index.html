@@ -1017,10 +1017,16 @@ async function probarSistema(btn) {
   const linea = (nombre, chk) => `${chk.ok ? '✅' : '❌'} ${nombre}${chk.ok ? '' : ` -- ${chk.detalle}`}`;
   let texto = `${data.ok ? '✅ Todo funcionando normal.' : '⚠️ Hay un problema:'}\n`
     + `${linea('Base de datos', data.bd)}\n${linea('Netpay (generar link)', data.netpay)}\n${linea('Webhook de Netpay', data.webhook)}`;
-  if (!data.whatsappConfigurado) {
-    texto += `\n\n📵 Este resultado NO se mandó por WhatsApp porque TELEFONO_DUENO no está configurado en Railway (Variables) -- por eso nunca te llega el aviso diario, aunque el sistema sí esté corriendo la prueba.`;
+  // CORREGIDO (13-oct-2026): antes solo se revisaba si TELEFONO_DUENO
+  // existía, no si el WhatsApp de verdad se mandó -- por eso un numero mal
+  // formateado (sin el "+") pasaba la prueba sin avisar nada. Ahora se usa
+  // el resultado real del envío (whatsappEnviado/whatsappError).
+  if (data.whatsappEnviado) {
+    texto += `\n\n📲 El aviso de WhatsApp sí se envió -- revisa tu teléfono.`;
+  } else {
+    texto += `\n\n📵 El aviso de WhatsApp NO se pudo enviar: ${data.whatsappError || 'razón desconocida'}.`;
   }
-  mostrarBannerSistema(texto, !data.ok || !data.whatsappConfigurado);
+  mostrarBannerSistema(texto, !data.ok || !data.whatsappEnviado);
 }
 function mostrarBannerSistema(texto, falla) {
   const banner = document.getElementById('sistema-banner');
