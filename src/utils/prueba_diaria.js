@@ -92,7 +92,25 @@ async function ejecutarPruebaDiaria() {
   }
 
   logger.info(`Resultado de prueba diaria: ${todoBien ? "OK" : "CON FALLOS"}`);
+
+  // NUEVO (12-oct-2026, pedido por Diego: "no tengo un mensaje que me diga
+  // que todo bien, me preocupa eso"): antes esta funcion no regresaba nada
+  // -- solo mandaba el WhatsApp y ya. Si TELEFONO_DUENO nunca se configuro
+  // en Railway, notificarDueno() se queda callada (solo deja un warning en
+  // los logs de Railway, que Diego no ve), asi que la prueba podia llevar
+  // dias "funcionando" sin que el mensaje de "todo bien" le llegara nunca a
+  // Diego -- y el no tenia forma de saber si el problema era el sistema o
+  // solo el aviso. Ahora se regresa el detalle para que el boton "Probar
+  // sistema ahora" del dashboard (ver /api/sistema/probar en dashboard.js)
+  // pueda mostrarlo EN PANTALLA, sin depender de que el WhatsApp llegue.
+  const whatsappConfigurado = !!process.env.TELEFONO_DUENO;
+  if (!whatsappConfigurado) {
+    logger.warn("TELEFONO_DUENO no esta configurada -- la prueba diaria corre, pero el aviso de 'todo bien' por WhatsApp nunca se manda.");
+  }
+
   await notificarDueno(mensaje);
+
+  return { ok: todoBien, bd, netpay, webhook, whatsappConfigurado, mensaje };
 }
 
 // Corre cada 10 min y dispara la prueba una sola vez al dia, cuando la hora

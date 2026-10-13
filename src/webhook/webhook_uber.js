@@ -11,6 +11,14 @@ const crypto = require("crypto");
 const router = express.Router();
 const logger = require("../utils/logger");
 const db = require("../db/database");
+// NUEVO (07-oct-2026, pedido por Diego): cuando Uber Direct reporta que una
+// entrega ya en curso se cancelo o se regreso (el repartidor no pudo
+// completarla), antes SOLO se le avisaba al cliente con un mensaje generico
+// -- nadie de Mr. Sushi se enteraba a menos que el cliente volviera a
+// escribir. El pedido ya esta pagado, asi que alguien tiene que decidir
+// rapido si se reembolsa o se manda otro repartidor (ver el boton "Solicitar
+// otro repartidor" en el dashboard, src/dashboard/index.html).
+const { notificarDueno } = require("../utils/alertas");
 
 function getTwilioClient() {
   return require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -59,7 +67,17 @@ const MENSAJES_ESTATUS = {
   "dropoff": null, // ya visible en el link de seguimiento de Uber
   "delivered": "🍣 ¡Tu pedido fue entregado! Buen provecho.",
   "canceled": "😕 Hubo un problema con el repartidor y la entrega se canceló. Nos pondremos en contacto contigo.",
+  // NUEVO (07-oct-2026): "returned" es cuando el repartidor SI recogio el
+  // pedido pero no pudo entregarlo (ej. no encontro al cliente) y lo esta
+  // regresando -- antes este estatus no tenia ni mensaje ni alerta, el
+  // cliente se quedaba sin ningun aviso.
+  "returned": "😕 El repartidor no pudo entregar tu pedido y lo está regresando. Nos pondremos en contacto contigo.",
 };
+
+// Estatus que significan que la entrega NO se va a completar con este
+// repartidor -- en ambos casos el pedido ya esta pagado, asi que alguien de
+// Mr. Sushi tiene que decidir rapido (reembolsar o mandar otro repartidor).
+const ESTATUS_FALLO_ENTREGA = new Set(["canceled", "returned"]);
 
 // NOTA IMPORTANTE: index.js ya usa express.json() de forma GLOBAL para todas
 // las rutas. Eso significa que, para cuando una peticion llega aqui, el cuerpo
@@ -104,6 +122,18 @@ router.post("/webhook/uber", async (req, res) => {
     const mensaje = MENSAJES_ESTATUS[nuevoEstatus];
     if (mensaje && pedido.telefono_cliente) {
       await enviarMensaje(pedido.telefono_cliente, mensaje);
+    }
+
+    // NUEVO (07-oct-2026, pedido por Diego): alerta inmediata cuando la
+    // entrega falla a medio camino -- antes esto solo quedaba en los logs.
+    // El pedido ya esta pagado, asi que el dueno/sucursal necesita saber de
+    // inmediato para contactar al cliente (reembolsar o mandar otro
+    // repartidor con el boton del dashboard) en vez de esperar a que el
+    // cliente se queje.
+    if (ESTATUS_FALLO_ENTREGA.has(nuevoEstatus)) {
+      notificarDueno(
+        `🔴 Uber Direct no pudo completar una entrega (estatus: "${nuevoEstatus}").\n\nPedido: ${pedido.id}\nCliente: ${(pedido.telefono_cliente || "").replace("whatsapp:", "")}\nSucursal: ${pedido.sucursal}\nDirección: ${pedido.direccion || "—"}\n\nEl pedido ya está pagado -- contacta al cliente para decidir si se reembolsa o se manda otro repartidor (puedes usar el botón "Solicitar otro repartidor" en el dashboard).`
+      );
     }
 
   } catch (error) {

@@ -1,0 +1,32 @@
+[33mcommit e8d3b9945d154a21e33074b546d681b6154ffd5b[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m, [m[1;31morigin/master[m[33m)[m
+Author: Diego <sistemasmrsushi@gmail.com>
+Date:   Mon Oct 12 00:37:19 2026 -0600
+
+    Agrega timeout a registrarWebhook y mejora el detalle de errores del boton Probar sistema
+
+ src/dashboard/index.html | 54 [32m++++++++++++++++++++++++++++++++++[m[31m--------------[m
+ src/utils/netpay.js      | 16 [32m++++++++++++++[m
+ 2 files changed, 54 insertions(+), 16 deletions(-)
+
+[33mcommit 72ac847d69d6080b8c260a48a4d12343fe8052dd[m
+Author: Diego <sistemasmrsushi@gmail.com>
+Date:   Mon Oct 12 00:22:22 2026 -0600
+
+    Agrega reembolsos con Netpay desde el dashboard (solo gerente)
+
+ src/dashboard/dashboard.js | 26 [32m++++++++++++++++++++++++[m
+ src/dashboard/index.html   | 50 [32m++++++++++++++++++++++++++++++++++++++++++++++[m
+ 2 files changed, 76 insertions(+)
+
+[33mcommit 475fd6d0312a0fef8b2b43853a030a18e8d98065[m
+Author: Diego <sistemasmrsushi@gmail.com>
+Date:   Fri Oct 9 15:21:51 2026 -0600
+
+    Agrega reembolsos con Netpay desde el dashboard (solo gerente)
+
+ src/dashboard/dashboard.js    | 88 [32m+++++++++++++++++++++++++++++++++++++++++++[m
+ src/dashboard/index.html      | 86 [32m++++++++++++++++++++++++++++++++++++++++[m[31m--[m
+ src/db/database.js            | 43 [32m+++++++++++++++++++++[m
+ src/utils/netpay.js           | 86 [32m+++++++++++++++++++++++++++++++++++++++++[m[31m-[m
+ src/webhook/webhook_netpay.js |  8 [32m++++[m
+ 5 files changed, 306 insertions(+), 5 deletions(-)
