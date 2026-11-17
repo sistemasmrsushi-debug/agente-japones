@@ -10,6 +10,13 @@ const { generarLinkPago } = require("../utils/netpay");
 const { estaAbierto, textoHorario } = require("../utils/horario");
 const { validarCupon, calcularDescuento } = require("../utils/cupones");
 const { notificarDueno } = require("../utils/alertas");
+// NUEVO (17-nov-2026, pedido por Diego): mandar el pedido al POS de Grupo
+// Telnet en cuanto queda confirmado SIN pasar por Netpay -- pedidos de
+// sucursal (se pagan en persona) y el caso raro de un pedido a domicilio
+// con cupón de 100% (no hay nada que cobrar con tarjeta). Los pedidos a
+// domicilio que SI se pagan con tarjeta se mandan desde webhook_netpay.js,
+// hasta que Netpay confirme el pago. Ver telnet_pos.js.
+const { enviarPedidoATelnet } = require("../utils/telnet_pos");
 // DESACTIVADO (07-oct-2026, decision de Diego): la consulta de respaldo
 // (pago_respaldo.js) se probo contra un pago real confirmado y NINGUNA de
 // las rutas candidatas de Netpay funciono (todas dieron 404) -- no hay
@@ -546,6 +553,13 @@ async function crearPedidoDomicilioYPedirPago(telefono, opts) {
   await db.guardarHistorial(telefono, []);
   logger.info(`Pedido pre-registrado (${pedido.estado}): ${pedido.id} -> ${pedido.sucursal}`);
   if (cupon) await db.incrementarUsoCupon(cupon.codigo).catch(e => logger.error("Error incrementando uso de cupon: " + e.message));
+  // NUEVO (17-nov-2026): si el cupón cubrió el 100% (estado ya es
+  // "pendiente", no "pendiente_pago"), no hay pago con tarjeta que esperar
+  // -- se manda a Telnet de una vez. El caso normal (con pago via Netpay) se
+  // manda desde webhook_netpay.js hasta que el pago se confirme.
+  if (pedido.estado === "pendiente") {
+    enviarPedidoATelnet(pedido, { pagadaConTarjeta: false }).catch(e => logger.error(`Error inesperado mandando el pedido ${pedido.id} a Telnet: ${e.message}`));
+  }
 
   // Recordar esta direccion para el proximo pedido del mismo telefono (ver
   // tabla "clientes"). No bloquea el flujo si falla -- es una mejora de
@@ -1259,6 +1273,11 @@ async function ejecutarAccion(accion, datos, telefono) {
         await db.guardarPedido(pedido);
         logger.info(`Pedido pre-registrado (${pedido.estado}, via IA): ${pedido.id} -> ${pedido.sucursal}`);
         if (cupon) await db.incrementarUsoCupon(cupon.codigo).catch(e => logger.error("Error incrementando uso de cupon: " + e.message));
+        // NUEVO (17-nov-2026): mismo caso que en crearPedidoDomicilioYPedirPago
+        // -- cupón de 100%, nada que esperar de Netpay, se manda a Telnet ya.
+        if (pedido.estado === "pendiente") {
+          enviarPedidoATelnet(pedido, { pagadaConTarjeta: false }).catch(e => logger.error(`Error inesperado mandando el pedido ${pedido.id} a Telnet: ${e.message}`));
+        }
 
         // Igual que en crearPedidoDomicilioYPedirPago: recordar esta direccion
         // para ofrecerla en el proximo pedido del mismo telefono.
@@ -1339,6 +1358,10 @@ async function ejecutarAccion(accion, datos, telefono) {
       await db.guardarPedido(pedido);
       logger.info(`Pedido en DB: ${pedido.id} -> ${pedido.sucursal}`);
       if (cuponSucursal) await db.incrementarUsoCupon(cuponSucursal.codigo).catch(e => logger.error("Error incrementando uso de cupon: " + e.message));
+      // NUEVO (17-nov-2026, pedido por Diego): pedido de sucursal (para
+      // recoger), se paga en persona -- se manda a Telnet de inmediato, no
+      // hay ningun pago con tarjeta que esperar.
+      enviarPedidoATelnet(pedido, { pagadaConTarjeta: false }).catch(e => logger.error(`Error inesperado mandando el pedido ${pedido.id} a Telnet: ${e.message}`));
       const itemsTexto = items.map(formatearItemTexto).join("\n");
       const totalTextoSucursal = lineasTotal(totalSucursal, cuponSucursal, descuentoSucursal);
       await enviarMensaje(telefono,

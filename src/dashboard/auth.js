@@ -8,39 +8,64 @@
 // agrega tokens de sesion reales: se generan al hacer login
 // y se validan en cada request protegido.
 //
-// Las sesiones se guardan en memoria (no en base de datos).
-// Esto es suficiente para un panel interno de pocos usuarios,
-// pero significa que todos cierran sesion si el servidor
-// se reinicia (por ejemplo, tras un redeploy en Railway).
+// CAMBIADO (13-oct-2026, pedido por Diego: "se cierra sesion el dashboard,
+// deberia quedarse abierto"): las sesiones ANTES vivian solo en memoria (un
+// Map aqui mismo) -- eso significaba que CUALQUIER reinicio del servidor
+// (cada redeploy en Railway, y ese dia hubo varios seguidos) cerraba la
+// sesion de todo mundo de golpe, sin aviso ni forma de evitarlo. Diego
+// confirmo que ademas le pasaba en un dia normal, sin ningun deploy de por
+// medio -- la sesion de 8h se cortaba a media jornada sin importar que
+// estuviera activamente usando el dashboard. Ahora las sesiones se guardan
+// en la base de datos (ver dashboard_sesiones en database.js) para
+// sobrevivir a los redeploys, Y se volvieron "deslizantes": cada peticion
+// valida empuja la expiracion otras 8h hacia adelante (ver obtenerSesion
+// mas abajo), asi que una sesion en uso activo nunca se corta sola -- solo
+// expira si de verdad pasan 8h sin ninguna peticion (ej. se quedo la laptop
+// cerrada toda la noche).
 // =============================================
 const crypto = require("crypto");
+const db = require("../db/database");
 
-const SESIONES = new Map(); // token -> { usuario, rol, sucursal, expira }
-const DURACION_MS = 8 * 60 * 60 * 1000; // 8 horas
+const DURACION_MS = 8 * 60 * 60 * 1000; // 8 horas de INACTIVIDAD (se renueva con cada peticion, ver obtenerSesion)
 
-// NUEVO (26-sep-2026, pedido por Diego): rol "supervisor" -- se le agrega
-// "sucursales" (arreglo) a la sesion, ademas de "sucursal" (que ya existia
-// para el rol "sucursal", una sola). Queda undefined para los roles que no
-// lo usan, sin romper nada de lo que ya dependia de esta funcion.
-function crearSesion({ usuario, rol, sucursal, sucursales }) {
+async function crearSesion({ usuario, rol, sucursal, sucursales }) {
   const token = crypto.randomBytes(32).toString("hex");
-  SESIONES.set(token, { usuario, rol, sucursal, sucursales, expira: Date.now() + DURACION_MS, ultimaActividad: Date.now() });
+  await db.crearSesionDB(token, { usuario, rol, sucursal, sucursales, expira: new Date(Date.now() + DURACION_MS) });
   return token;
 }
 
-function obtenerSesion(token) {
-  const sesion = SESIONES.get(token);
-  if (!sesion) return null;
-  if (Date.now() > sesion.expira) {
-    SESIONES.delete(token);
+async function obtenerSesion(token) {
+  if (!token) return null;
+  const fila = await db.obtenerSesionDB(token);
+  if (!fila) return null;
+  if (new Date(fila.expira).getTime() < Date.now()) {
+    db.eliminarSesionDB(token).catch(() => {}); // ya vencida, se limpia sola
     return null;
   }
-  sesion.ultimaActividad = Date.now(); // "heartbeat": cada request valido cuenta como actividad
-  return sesion;
+
+  // Sesion deslizante: cada peticion valida renueva la expiracion. No se
+  // espera (await) esta escritura antes de regresar la sesion -- si falla
+  // por lo que sea, la peticion actual sigue adelante normal (la sesion
+  // simplemente no se habra alargado esta vez, no es motivo para tronar la
+  // peticion del usuario).
+  const nuevaExpira = new Date(Date.now() + DURACION_MS);
+  db.extenderSesionDB(token, nuevaExpira).catch((e) => {
+    require("../utils/logger").error("Error extendiendo sesion del dashboard: " + e.message);
+  });
+
+  return {
+    usuario: fila.usuario,
+    rol: fila.rol,
+    sucursal: fila.sucursal,
+    sucursales: fila.sucursales,
+    expira: nuevaExpira.getTime(),
+    ultimaActividad: Date.now(),
+  };
 }
 
-function cerrarSesion(token) {
-  SESIONES.delete(token);
+async function cerrarSesion(token) {
+  if (!token) return;
+  await db.eliminarSesionDB(token);
 }
 
 // Umbral para considerar que alguien "tiene el dashboard abierto ahora mismo".
@@ -50,20 +75,17 @@ const UMBRAL_EN_LINEA_MS = 60 * 1000;
 
 // Lista quien tiene el dashboard abierto ahora mismo (actividad reciente),
 // para que el gerente pueda ver que sucursales estan conectadas.
-function obtenerSesionesActivas() {
+async function obtenerSesionesActivas() {
   const ahora = Date.now();
-  const activas = [];
-  for (const sesion of SESIONES.values()) {
-    if (ahora <= sesion.expira && (ahora - sesion.ultimaActividad) <= UMBRAL_EN_LINEA_MS) {
-      activas.push({
-        usuario: sesion.usuario,
-        rol: sesion.rol,
-        sucursal: sesion.sucursal,
-        ultimaActividad: sesion.ultimaActividad,
-      });
-    }
-  }
-  return activas;
+  const filas = await db.obtenerTodasSesionesDB();
+  return filas
+    .filter(f => (ahora - new Date(f.ultima_actividad).getTime()) <= UMBRAL_EN_LINEA_MS)
+    .map(f => ({
+      usuario: f.usuario,
+      rol: f.rol,
+      sucursal: f.sucursal,
+      ultimaActividad: new Date(f.ultima_actividad).getTime(),
+    }));
 }
 
 function extraerToken(req) {
@@ -73,35 +95,50 @@ function extraerToken(req) {
 }
 
 // Middleware: exige sesion valida (cualquier rol)
-function requireAuth(req, res, next) {
-  const token = extraerToken(req);
-  const sesion = token && obtenerSesion(token);
-  if (!sesion) return res.status(401).json({ error: "Sesion invalida o expirada. Inicia sesion de nuevo." });
-  req.sesion = sesion;
-  next();
+async function requireAuth(req, res, next) {
+  try {
+    const token = extraerToken(req);
+    const sesion = await obtenerSesion(token);
+    if (!sesion) return res.status(401).json({ error: "Sesion invalida o expirada. Inicia sesion de nuevo." });
+    req.sesion = sesion;
+    next();
+  } catch (error) {
+    require("../utils/logger").error("Error validando sesion: " + error.message);
+    res.status(500).json({ error: "Error interno validando la sesion" });
+  }
 }
 
 // Middleware: exige sesion valida Y rol gerente
-function requireGerente(req, res, next) {
-  const token = extraerToken(req);
-  const sesion = token && obtenerSesion(token);
-  if (!sesion) return res.status(401).json({ error: "Sesion invalida o expirada. Inicia sesion de nuevo." });
-  if (sesion.rol !== "gerente") return res.status(403).json({ error: "Solo el gerente puede realizar esta accion." });
-  req.sesion = sesion;
-  next();
+async function requireGerente(req, res, next) {
+  try {
+    const token = extraerToken(req);
+    const sesion = await obtenerSesion(token);
+    if (!sesion) return res.status(401).json({ error: "Sesion invalida o expirada. Inicia sesion de nuevo." });
+    if (sesion.rol !== "gerente") return res.status(403).json({ error: "Solo el gerente puede realizar esta accion." });
+    req.sesion = sesion;
+    next();
+  } catch (error) {
+    require("../utils/logger").error("Error validando sesion: " + error.message);
+    res.status(500).json({ error: "Error interno validando la sesion" });
+  }
 }
 
 // Middleware: exige sesion valida Y rol gerente O administrativo -- para
 // reportes, que ambos pueden descargar (el administrativo solo ve/descarga
 // sus sucursales asignadas, forzado en el propio endpoint, no aqui).
-function requireReportes(req, res, next) {
-  const token = extraerToken(req);
-  const sesion = token && obtenerSesion(token);
-  if (!sesion) return res.status(401).json({ error: "Sesion invalida o expirada. Inicia sesion de nuevo." });
-  if (sesion.rol !== "gerente" && sesion.rol !== "administrativo")
-    return res.status(403).json({ error: "No tienes permiso para descargar reportes." });
-  req.sesion = sesion;
-  next();
+async function requireReportes(req, res, next) {
+  try {
+    const token = extraerToken(req);
+    const sesion = await obtenerSesion(token);
+    if (!sesion) return res.status(401).json({ error: "Sesion invalida o expirada. Inicia sesion de nuevo." });
+    if (sesion.rol !== "gerente" && sesion.rol !== "administrativo")
+      return res.status(403).json({ error: "No tienes permiso para descargar reportes." });
+    req.sesion = sesion;
+    next();
+  } catch (error) {
+    require("../utils/logger").error("Error validando sesion: " + error.message);
+    res.status(500).json({ error: "Error interno validando la sesion" });
+  }
 }
 
 // Middleware: bloquea al rol "administrativo" (solo ver/descargar) de
@@ -114,12 +151,11 @@ function bloquearSoloLectura(req, res, next) {
   next();
 }
 
-// Limpieza periodica de sesiones vencidas (evita crecer memoria indefinidamente)
+// Limpieza periodica de sesiones vencidas (evita crecer la tabla indefinidamente).
 setInterval(() => {
-  const ahora = Date.now();
-  for (const [token, sesion] of SESIONES) {
-    if (ahora > sesion.expira) SESIONES.delete(token);
-  }
+  db.eliminarSesionesVencidas().catch((e) => {
+    require("../utils/logger").error("Error limpiando sesiones vencidas: " + e.message);
+  });
 }, 60 * 60 * 1000).unref();
 
 module.exports = { crearSesion, obtenerSesion, cerrarSesion, requireAuth, requireGerente, requireReportes, bloquearSoloLectura, obtenerSesionesActivas };

@@ -1,9 +1,8 @@
 // scripts/migrar_config_a_db.js
 // =============================================
 // Migracion UNICA: carga las sucursales y el menu
-// desde config/restaurante.js, y los usuarios del
-// dashboard (con sus contraseñas ya actualizadas)
-// hacia las tablas nuevas de PostgreSQL.
+// desde config/restaurante.js hacia las tablas
+// nuevas de PostgreSQL.
 //
 // Uso (una sola vez, desde la raiz del proyecto):
 //   node scripts/migrar_config_a_db.js
@@ -11,41 +10,22 @@
 // Es seguro correrlo mas de una vez: usa
 // "ON CONFLICT DO NOTHING", asi que no duplica ni
 // sobreescribe filas que ya existan.
+//
+// CORREGIDO (17-nov-2026, hallazgo de seguridad al revisar la integracion
+// con Telnet): este archivo traia, en TEXTO PLANO, las contraseñas reales de
+// las 26 cuentas del dashboard (las 25 sucursales + gerente) -- cualquiera
+// con acceso al repositorio podia leerlas de un vistazo. Esa migracion de
+// usuarios ya no hace falta (los 26 usuarios ya existen en la base de
+// datos -- este script usa "ON CONFLICT DO NOTHING", asi que de todos modos
+// ya no tocaba nada aqui desde hace tiempo). Las contraseñas reales se
+// rotaron (ver scripts/rotar_passwords_dashboard.js) y este bloque se quito
+// por completo. Si alguna vez hace falta crear un usuario nuevo del
+// dashboard, se hace desde el panel de administracion (Administración →
+// Usuarios, con el rol "gerente"), nunca escribiendo la contraseña aqui.
 // =============================================
 require("dotenv").config();
 const db = require("../src/db/database");
 const restaurante = require("../config/restaurante");
-
-// Usuarios del dashboard con las contraseñas YA actualizadas
-// (las mismas que quedaron activas en el ultimo deploy).
-const USUARIOS = [
-  { usuario: "vallejo",             password: "X@xBEAFBw4!K2v",  sucursal: "Vallejo",               rol: "sucursal" },
-  { usuario: "zonaesmeralda",       password: "SV8j5ek3Vjq%vU",  sucursal: "Zona Esmeralda",        rol: "sucursal" },
-  { usuario: "arboledas",           password: "R%y7S-Hd2u@t!u",  sucursal: "Arboledas",             rol: "sucursal" },
-  { usuario: "zonaazulrest",        password: "GG%ta4H-2yDkGQ",  sucursal: "Zona Azul Restaurante", rol: "sucursal" },
-  { usuario: "mundoe",              password: "ENKcUw5c--grEc",  sucursal: "Mundo E",               rol: "sucursal" },
-  { usuario: "fuentessatelite",     password: "D=Yg3#4sjsxZeN",  sucursal: "Fuentes de Satelite",   rol: "sucursal" },
-  { usuario: "patriotismo",         password: "Ed5vpnxBW-74ys",  sucursal: "Patriotismo",           rol: "sucursal" },
-  { usuario: "hahhaazul",           password: "Zh@R6d@=pKKy4c",  sucursal: "Hahha Azul",            rol: "sucursal" },
-  { usuario: "masaryk",             password: "Kd9U@kgxHK@zFc",  sucursal: "Masaryk",               rol: "sucursal" },
-  { usuario: "americana",           password: "Ws#at8t*8mghZ=",  sucursal: "Americana",             rol: "sucursal" },
-  { usuario: "tecamachalco",        password: "H!!r8!%!*4n7#%",  sucursal: "Tecamachalco",          rol: "sucursal" },
-  { usuario: "galeriasmetepec",     password: "Yp4zA@4wsDxN!G",  sucursal: "Galerias Metepec",      rol: "sucursal" },
-  { usuario: "galeriasserdan",      password: "JG+-hzs4Dq9zFb",  sucursal: "Galerias Serdan",       rol: "sucursal" },
-  { usuario: "urbancenter",         password: "S=J*2Pg!W%5uru",  sucursal: "Urban Center",          rol: "sucursal" },
-  { usuario: "hahhaesmeralda",      password: "Ns%u=hWX8vpbyz",  sucursal: "Hahha Esmeralda",       rol: "sucursal" },
-  { usuario: "patiosantafe",        password: "Q#VXP!*2Zyz9ep",  sucursal: "Patio Santa Fe",        rol: "sucursal" },
-  { usuario: "atizapan",            password: "Dc=bHfEws3a4x!",  sucursal: "Atizapan",              rol: "sucursal" },
-  { usuario: "zonaazuldom",         password: "P5j9@UySRaR6+Q",  sucursal: "Zona Azul Domicilio",   rol: "sucursal" },
-  { usuario: "perisur",             password: "SR+vCyn67Nxmht",  sucursal: "Perisur",               rol: "sucursal" },
-  { usuario: "lomasverdes",         password: "FHsM-FjPe95Abq",  sucursal: "Lomas Verdes",          rol: "sucursal" },
-  { usuario: "delta",               password: "Ej*5tJ8msMWy8f",  sucursal: "Delta",                 rol: "sucursal" },
-  { usuario: "coapa",               password: "NRdVABu5*wghb6",  sucursal: "Coapa",                 rol: "sucursal" },
-  { usuario: "galeriástoluca",      password: "S@uT#-R+8RBpmj",  sucursal: "Galerias Toluca",       rol: "sucursal" },
-  { usuario: "galeriascuernavaca",  password: "PzP7x2T-ZbU9z%",  sucursal: "Galerias Cuernavaca",   rol: "sucursal" },
-  { usuario: "ccsantafe",           password: "U4X+JtH6gc#3m9",  sucursal: "CC Santa Fe",           rol: "sucursal" },
-  { usuario: "gerente",             password: "TexbT%%mgt-46zfe", sucursal: null,                   rol: "gerente"  },
-];
 
 async function migrar() {
   await db.initDB(); // crea las tablas nuevas si no existen
@@ -89,11 +69,8 @@ async function migrar() {
     console.log(`  ${totalItems} platillos procesados.`);
   }
 
-  console.log("Migrando usuarios del dashboard...");
-  for (const u of USUARIOS) {
-    await db.insertarUsuarioDashboardSiNoExiste(u);
-  }
-  console.log(`  ${USUARIOS.length} usuarios procesados.`);
+  // La migracion de usuarios del dashboard se quito de aqui (ver el
+  // comentario al principio del archivo) -- ya no hace falta.
 
   console.log("\nMigracion completa. Es seguro volver a correr este script si hace falta.");
   process.exit(0);

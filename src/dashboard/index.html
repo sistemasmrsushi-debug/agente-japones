@@ -312,18 +312,24 @@ tr.fila-modificada{background:rgba(212,134,10,0.08)}
         </div>
         <div class="tabla-wrap">
           <table>
-            <thead><tr><th>Categoría</th><th>Nombre</th><th>Precio</th><th>Descripción</th><th>Activo</th><th>Acciones</th></tr></thead>
-            <tbody id="tbody-admin-menu"><tr><td colspan="6" class="vacio">Cargando...</td></tr></tbody>
+            <thead><tr><th>Categoría</th><th>Nombre</th><th>Precio</th><th>Descripción</th><th>Clave Telnet</th><th>Activo</th><th>Acciones</th></tr></thead>
+            <tbody id="tbody-admin-menu"><tr><td colspan="7" class="vacio">Cargando...</td></tr></tbody>
           </table>
         </div>
       </div>
 
       <div class="admin-sub" id="admin-sucursales">
         <div class="admin-msg" id="as-msg"></div>
+        <!-- NUEVO (17-nov-2026, pedido por Diego): integracion con el POS de
+             Grupo Telnet. Grupo Telnet tiene 40 sucursales registradas de su
+             lado, nosotros 25 -- aqui se relaciona cada sucursal nuestra con
+             su numero en Telnet, su terminal de cobro, y se puede
+             activar/desactivar el envio automatico de pedidos sucursal por
+             sucursal (para poder probarlo primero en una sola, por ejemplo). -->
         <div class="tabla-wrap">
           <table>
-            <thead><tr><th>Sucursal</th><th>Dirección</th><th>Teléfono</th><th>Tel. transferencia</th><th>WhatsApp</th><th>Horario</th><th>Activa</th><th></th></tr></thead>
-            <tbody id="tbody-admin-sucursales"><tr><td colspan="8" class="vacio">Cargando...</td></tr></tbody>
+            <thead><tr><th>Sucursal</th><th>Dirección</th><th>Teléfono</th><th>Tel. transferencia</th><th>WhatsApp</th><th>Horario</th><th>Activa</th><th>Núm. en Telnet</th><th>Terminal cobro Telnet</th><th>Enviar a Telnet</th><th></th></tr></thead>
+            <tbody id="tbody-admin-sucursales"><tr><td colspan="11" class="vacio">Cargando...</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -402,6 +408,66 @@ function fetchAuth(url, options = {}) {
   });
 }
 
+// NUEVO (13-oct-2026, reportado por Diego: "se cerraba cuando refrescaba la
+// pagina"): esto ANTES vivia dentro de login() nada mas. El problema es que
+// login() es la UNICA funcion que llenaba la variable "sesion" y mostraba la
+// pantalla de la app -- el token se guardaba en localStorage, pero al
+// refrescar la pagina "sesion" volvia a nacer en null (ver la linea de
+// arriba, "let sesion = null...") y nada volvia a revisar localStorage para
+// reconstruirla. Por eso SIEMPRE aparecia la pantalla de login al refrescar,
+// aunque el token todavia fuera valido (y ahora que las sesiones viven en la
+// base de datos, ver auth.js, el token de verdad seguia vivo del lado del
+// servidor). Se sacó todo el "despues de tener los datos de la sesion" a esta
+// funcion para poder reusarlo tanto desde login() como desde restaurarSesion()
+// (mas abajo), que es la que corre sola al cargar la pagina.
+function entrarApp(data) {
+  sesion = data;
+  localStorage.setItem('mrsushi_token', data.token);
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  // NUEVO (26-sep-2026, pedido por Diego): roles "supervisor" (ve varias
+  // sucursales combinadas) y "administrativo" (solo ver/descargar, ve
+  // varias sucursales pero sin poder editar nada) -- ambos muestran su
+  // lista de sucursales en el encabezado.
+  document.getElementById('header-sucursal').textContent =
+    sesion.rol==='gerente' ? 'Gerente General' :
+    sesion.rol==='supervisor' ? `Supervisor · ${(sesion.sucursales||[]).join(', ')}` :
+    sesion.rol==='administrativo' ? `Administrativo · ${(sesion.sucursales||[]).join(', ')}` :
+    sesion.sucursal;
+  if (sesion.rol==='gerente') document.getElementById('tab-gerente').style.display='inline-block';
+  if (sesion.rol==='gerente') document.getElementById('tab-admin').style.display='inline-block';
+  if (sesion.rol==='gerente') document.getElementById('btn-probar-sistema').style.display='inline-block';
+  if (sesion.rol==='gerente' || sesion.rol==='administrativo') document.getElementById('tab-reportes').style.display='inline-block';
+  // El rol "administrativo" solo debe ver Pedidos + Reportes -- nada de
+  // Quejas ni Reservaciones (asi lo pidio Diego).
+  if (sesion.rol==='administrativo') {
+    document.getElementById('tab-reservaciones').style.display='none';
+    document.getElementById('tab-quejas').style.display='none';
+    // "Generar link" crea/edita pedidos -- el rol administrativo es de
+    // solo ver/descargar, asi que tampoco debe ver esta pestaña (el
+    // servidor tambien lo bloquea, ver bloquearSoloLectura en dashboard.js).
+    document.getElementById('tab-linkmanual').style.display='none';
+  }
+  // El selector de sucursal del panel "Generar link" solo hace falta para
+  // quien maneja mas de una (supervisor/gerente) -- el rol "sucursal" ya
+  // tiene la suya fija, no hay nada que elegir.
+  if (sesion.rol==='supervisor' || sesion.rol==='gerente') {
+    cargarLmSucursales();
+  }
+  if (sesion.rol==='gerente' || sesion.rol==='administrativo') {
+    // Rango por default del reporte: del 1ro del mes actual a hoy, para
+    // que nunca se quede vacio (ver reporte de Diego que solo arrojo 3
+    // pedidos -- resultó ser que no habia elegido fechas antes de
+    // descargar).
+    const hoy = new Date();
+    const primerDia = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    document.getElementById('rep-desde').value = formatoFechaLocal(primerDia);
+    document.getElementById('rep-hasta').value = formatoFechaLocal(hoy);
+  }
+  cargarDatos();
+  setInterval(cargarDatos, 30000);
+}
+
 async function login() {
   const usuario = document.getElementById('inp-usuario').value.trim();
   const password = document.getElementById('inp-password').value;
@@ -410,55 +476,33 @@ async function login() {
     const r = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({usuario,password}) });
     const data = await r.json();
     if (!r.ok) { document.getElementById('login-error').textContent = data.error; return; }
-    sesion = data;
-    localStorage.setItem('mrsushi_token', data.token);
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('app').style.display = 'flex';
-    // NUEVO (26-sep-2026, pedido por Diego): roles "supervisor" (ve varias
-    // sucursales combinadas) y "administrativo" (solo ver/descargar, ve
-    // varias sucursales pero sin poder editar nada) -- ambos muestran su
-    // lista de sucursales en el encabezado.
-    document.getElementById('header-sucursal').textContent =
-      sesion.rol==='gerente' ? 'Gerente General' :
-      sesion.rol==='supervisor' ? `Supervisor · ${(sesion.sucursales||[]).join(', ')}` :
-      sesion.rol==='administrativo' ? `Administrativo · ${(sesion.sucursales||[]).join(', ')}` :
-      sesion.sucursal;
-    if (sesion.rol==='gerente') document.getElementById('tab-gerente').style.display='inline-block';
-    if (sesion.rol==='gerente') document.getElementById('tab-admin').style.display='inline-block';
-    if (sesion.rol==='gerente') document.getElementById('btn-probar-sistema').style.display='inline-block';
-    if (sesion.rol==='gerente' || sesion.rol==='administrativo') document.getElementById('tab-reportes').style.display='inline-block';
-    // El rol "administrativo" solo debe ver Pedidos + Reportes -- nada de
-    // Quejas ni Reservaciones (asi lo pidio Diego).
-    if (sesion.rol==='administrativo') {
-      document.getElementById('tab-reservaciones').style.display='none';
-      document.getElementById('tab-quejas').style.display='none';
-      // "Generar link" crea/edita pedidos -- el rol administrativo es de
-      // solo ver/descargar, asi que tampoco debe ver esta pestaña (el
-      // servidor tambien lo bloquea, ver bloquearSoloLectura en dashboard.js).
-      document.getElementById('tab-linkmanual').style.display='none';
-    }
-    // El selector de sucursal del panel "Generar link" solo hace falta para
-    // quien maneja mas de una (supervisor/gerente) -- el rol "sucursal" ya
-    // tiene la suya fija, no hay nada que elegir.
-    if (sesion.rol==='supervisor' || sesion.rol==='gerente') {
-      cargarLmSucursales();
-    }
-    if (sesion.rol==='gerente' || sesion.rol==='administrativo') {
-      // Rango por default del reporte: del 1ro del mes actual a hoy, para
-      // que nunca se quede vacio (ver reporte de Diego que solo arrojo 3
-      // pedidos -- resultó ser que no habia elegido fechas antes de
-      // descargar).
-      const hoy = new Date();
-      const primerDia = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-      document.getElementById('rep-desde').value = formatoFechaLocal(primerDia);
-      document.getElementById('rep-hasta').value = formatoFechaLocal(hoy);
-    }
-    cargarDatos();
-    setInterval(cargarDatos, 30000);
+    entrarApp(data);
   } catch { document.getElementById('login-error').textContent = 'Error de conexión'; }
 }
 
 function logout() { sesion=null; localStorage.removeItem('mrsushi_token'); document.getElementById('login-screen').style.display='flex'; document.getElementById('app').style.display='none'; document.getElementById('inp-password').value=''; }
+
+// NUEVO (13-oct-2026): corre sola en cuanto carga la pagina (ver la llamada
+// restaurarSesion() al final de este script). Si ya habia un token guardado
+// de una sesion anterior, le pregunta al servidor si todavia es valido
+// (/api/sesion) y, si si, entra directo a la app sin pedir usuario/contraseña
+// de nuevo -- asi un refresh de pagina (F5, Ctrl+R) ya NO cierra la sesion.
+// Si el token ya no es valido, fetchAuth() se encarga de limpiarlo (logout())
+// y simplemente se queda mostrando la pantalla de login normal.
+async function restaurarSesion() {
+  const token = localStorage.getItem('mrsushi_token');
+  if (!token) return; // nunca habia iniciado sesion en este navegador
+  try {
+    const r = await fetchAuth('/api/sesion');
+    if (!r.ok) return; // fetchAuth ya hizo logout() y puso el mensaje si fue 401
+    const data = await r.json();
+    entrarApp(data);
+  } catch {
+    // Sin internet o el servidor no contesto todavia -- no se fuerza nada,
+    // se queda en login y el usuario puede reintentar con el boton normal.
+  }
+}
+restaurarSesion();
 
 async function cargarDatos() {
   if (!sesion) return;
@@ -1139,13 +1183,14 @@ function renderAdminMenu(items) {
       <td class="celda-input"><input class="admin-input-edit" value="${(i.nombre||'').replace(/"/g,'&quot;')}" data-campo="nombre" oninput="marcarFilaModificada(this)"></td>
       <td class="celda-input" style="max-width:100px"><input class="admin-input-edit" type="number" step="0.01" min="0" value="${i.precio}" data-campo="precio" oninput="marcarFilaModificada(this)"></td>
       <td class="celda-input"><input class="admin-input-edit" value="${(i.descripcion||'').replace(/"/g,'&quot;')}" data-campo="descripcion" oninput="marcarFilaModificada(this)"></td>
+      <td class="celda-input" style="max-width:110px"><input class="admin-input-edit" value="${(i.telnet_clave_producto||'').replace(/"/g,'&quot;')}" placeholder="ej. AP0140" data-campo="telnet_clave_producto" oninput="marcarFilaModificada(this)" title="Clave de producto de Grupo Telnet para este platillo. Sin esto, el pedido con este platillo NO se puede mandar al POS de Telnet."></td>
       <td style="text-align:center"><input type="checkbox" data-campo="activo" ${i.activo !== false ? 'checked' : ''} onchange="marcarFilaModificada(this)" title="Si se desmarca, el agente de IA deja de ofrecer este platillo (no se borra, se puede reactivar cuando quieras)"></td>
       <td>
         <div class="acciones">
           <button class="btn-accion azul" onclick="guardarItemMenu(${i.id}, this)">Guardar</button>
         </div>
       </td>
-    </tr>`).join('') : '<tr><td colspan="6" class="vacio">Sin platillos registrados.</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="7" class="vacio">Sin platillos registrados.</td></tr>';
 }
 
 async function guardarItemMenu(id, btn) {
@@ -1214,8 +1259,11 @@ function renderAdminSucursales(sucursales) {
         <input class="admin-input-edit" type="time" style="width:110px" value="${s.horario_cierre||''}" data-campo="horario_cierre">
       </td>
       <td style="text-align:center"><input type="checkbox" data-campo="activo" ${s.activo !== false ? 'checked' : ''} title="Si se desmarca, el bot deja de ofrecer/asignar pedidos a esta sucursal"></td>
+      <td class="celda-input" style="max-width:110px"><input class="admin-input-edit" type="number" min="1" step="1" placeholder="ej. 12" value="${s.telnet_sucursal_id ?? ''}" data-campo="telnet_sucursal_id" title="El numero con el que Grupo Telnet identifica esta sucursal en su sistema (no es el mismo que usamos aqui)"></td>
+      <td class="celda-input" style="max-width:130px"><input class="admin-input-edit" value="${(s.telnet_terminal_tarjeta||'').replace(/"/g,'&quot;')}" placeholder="Terminal" data-campo="telnet_terminal_tarjeta" title="Clave de la terminal de cobro asignada por Grupo Telnet para los pedidos pagados en línea de esta sucursal"></td>
+      <td style="text-align:center"><input type="checkbox" data-campo="telnet_activo" ${s.telnet_activo ? 'checked' : ''} title="Si está marcado, los pedidos pagados de esta sucursal se mandan automáticamente al POS de Grupo Telnet. Actívalo solo cuando ya hayas confirmado el número de sucursal, la terminal y las claves de producto de su menú."></td>
       <td><button class="btn-accion azul" onclick="guardarSucursal(${s.id}, this)">Guardar</button></td>
-    </tr>`).join('') : '<tr><td colspan="8" class="vacio">Sin sucursales registradas.</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="11" class="vacio">Sin sucursales registradas.</td></tr>';
 }
 
 async function guardarSucursal(id, btn) {

@@ -101,6 +101,40 @@ async function initDB() {
     await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS netpay_transaction_id TEXT;`);
     await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS netpay_last_four TEXT;`);
     await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS reembolsado_en TIMESTAMPTZ;`);
+    // NUEVO (17-nov-2026, integracion con el POS de Grupo Telnet, ver
+    // src/utils/telnet_pos.js): guarda el resultado de mandarle este pedido
+    // al POS de la sucursal. telnet_pedido_id es el numero que Telnet
+    // regresa (se necesita para despues consultar su estatus con
+    // requestType=getEstatus); telnet_estatus es el ultimo estatus conocido
+    // (ENVIADO/PROCESANDO/LISTO/RECHAZADO/etc., ver seccion 9 del manual de
+    // Telnet) o "ERROR"/"NO_CONFIGURADO" si nunca se pudo mandar;
+    // telnet_error guarda el mensaje si algo fallo, para poder mostrarlo en
+    // el dashboard sin tener que ir a buscarlo en los logs de Railway.
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS telnet_pedido_id TEXT;`);
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS telnet_estatus TEXT;`);
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS telnet_error TEXT;`);
+    await client.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS telnet_enviado_en TIMESTAMPTZ;`);
+    // NUEVO (13-oct-2026, pedido por Diego: "se cierra sesion el dashboard,
+    // deberia quedarse abierto"): las sesiones del dashboard antes vivian
+    // SOLO en memoria (un Map dentro de auth.js) -- eso significaba que
+    // CUALQUIER reinicio del servidor (cada redeploy en Railway) borraba a
+    // todo mundo de sesion de golpe, sin aviso. Ahora se guardan aqui, en
+    // la base de datos, para que sobrevivan a los redeploys. Tambien se
+    // volvieron "deslizantes": cada peticion valida empuja la expiracion
+    // otras 8h hacia adelante (ver obtenerSesion en auth.js), asi que una
+    // sesion en uso activo nunca se corta a medio trabajo -- solo expira si
+    // de verdad pasan 8h sin ninguna peticion.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS dashboard_sesiones (
+        token TEXT PRIMARY KEY,
+        usuario TEXT NOT NULL,
+        rol TEXT NOT NULL,
+        sucursal TEXT,
+        sucursales JSONB,
+        expira TIMESTAMPTZ NOT NULL,
+        ultima_actividad TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
     await client.query(`
       CREATE TABLE IF NOT EXISTS reservaciones (
         id TEXT PRIMARY KEY,
@@ -158,6 +192,23 @@ async function initDB() {
     await client.query(`ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS municipio TEXT;`);
     await client.query(`ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS estado_direccion TEXT;`);
     await client.query(`ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS codigo_postal TEXT;`);
+    // NUEVO (17-nov-2026, pedido por Diego: integracion con el POS de Grupo
+    // Telnet para que el pedido llegue solo a la caja de la sucursal, ver
+    // src/utils/telnet_pos.js): Grupo Telnet identifica cada sucursal con su
+    // PROPIO numero (no es el mismo "id" que usamos aqui -- Telnet tiene 40
+    // sucursales registradas de su lado, nosotros 25), y cada sucursal con
+    // cobro con tarjeta necesita su propia terminal asignada por Telnet
+    // (terminalTarjeta). telnet_activo es el interruptor por sucursal que
+    // pidio Diego: aunque una sucursal ya tenga su numero/terminal de Telnet
+    // configurados, el pedido SOLO se manda al POS si esta columna esta en
+    // TRUE -- asi se puede activar el envio automatico sucursal por sucursal
+    // (empezando con una sola como piloto) en vez de prender las 25 de golpe.
+    // Por default queda en FALSE: una sucursal nueva (o todas, antes de
+    // configurar esto) NUNCA manda nada a Telnet hasta que alguien la active
+    // a proposito desde el panel de administracion.
+    await client.query(`ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS telnet_sucursal_id INTEGER;`);
+    await client.query(`ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS telnet_terminal_tarjeta TEXT;`);
+    await client.query(`ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS telnet_activo BOOLEAN DEFAULT FALSE;`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS menu_items (
         id SERIAL PRIMARY KEY,
@@ -170,6 +221,18 @@ async function initDB() {
         actualizado TIMESTAMPTZ DEFAULT NOW()
       );
     `);
+    // NUEVO (17-nov-2026, integracion Telnet): la clave de producto de Grupo
+    // Telnet para este platillo. A diferencia de "sucursal" (donde Telnet SI
+    // distingue 40 sucursales distintas), el catalogo de productos que Diego
+    // compartio es UNO SOLO compartido por todas las sucursales (todas las
+    // claves empiezan "AP", ninguna trae distincion por sucursal) -- por eso
+    // esta clave vive aqui, en el platillo, y no hace falta una tabla aparte
+    // por sucursal. Queda NULL hasta que alguien la confirme a mano desde el
+    // panel de administracion (ver la hoja de comparacion que se le mando a
+    // Diego) -- un platillo sin esta clave simplemente no se puede incluir en
+    // un pedido mandado a Telnet (ver telnet_pos.js: si falta, se avisa y NO
+    // se envia nada, para no arriesgarse a mandar una clave equivocada).
+    await client.query(`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS telnet_clave_producto TEXT;`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS dashboard_usuarios (
         usuario TEXT PRIMARY KEY,
@@ -407,6 +470,17 @@ async function guardarEntregaUber(pedidoId, { deliveryId, trackingUrl, estadoUbe
   return rows[0] || null;
 }
 
+// NUEVO (17-nov-2026, integracion Grupo Telnet): guarda el resultado de
+// mandar (o intentar mandar) este pedido al POS de la sucursal -- ver
+// src/utils/telnet_pos.js.
+async function guardarResultadoTelnet(pedidoId, { telnetPedidoId, estatus, error }) {
+  const { rows } = await pool.query(
+    "UPDATE pedidos SET telnet_pedido_id=$1, telnet_estatus=$2, telnet_error=$3, telnet_enviado_en=NOW(), actualizado=NOW() WHERE id=$4 RETURNING *",
+    [telnetPedidoId || null, estatus || null, error || null, pedidoId]
+  );
+  return rows[0] || null;
+}
+
 // Actualiza solo el estatus de una entrega ya creada (para los webhooks de
 // seguimiento: courier asignado, en camino, entregado, etc.)
 async function actualizarEstadoUber(deliveryId, estadoUber) {
@@ -611,15 +685,37 @@ async function obtenerSucursales() {
   return rows;
 }
 
+// NUEVO (17-nov-2026, integracion Telnet): pedidos.sucursal guarda el NOMBRE
+// de la sucursal (no su id), igual que ya hacen obtenerPedidos()/USUARIOS en
+// migrar_config_a_db.js -- esta funcion deja buscarla por ese mismo nombre
+// para leer sus datos de Telnet (telnet_sucursal_id, telnet_terminal_tarjeta,
+// telnet_activo) al momento de mandar un pedido. ILIKE por si hay diferencias
+// de mayusculas/minusculas, igual que el resto del codigo que compara nombres
+// de sucursal.
+async function obtenerSucursalPorNombre(nombre) {
+  if (!nombre) return null;
+  const { rows } = await pool.query("SELECT * FROM sucursales WHERE nombre ILIKE $1 LIMIT 1", [nombre]);
+  return rows[0] || null;
+}
+
 async function actualizarSucursal(id, campos) {
-  const permitidos = ["direccion", "telefono", "telefono_transferencia", "whatsapp", "horario_apertura", "horario_cierre", "activo"];
+  // telnet_sucursal_id/telnet_terminal_tarjeta/telnet_activo: NUEVO (17-nov-2026,
+  // integracion Grupo Telnet) -- ver el comentario junto a estas columnas en
+  // initDB() para el detalle de por que existen.
+  const permitidos = ["direccion", "telefono", "telefono_transferencia", "whatsapp", "horario_apertura", "horario_cierre", "activo", "telnet_sucursal_id", "telnet_terminal_tarjeta", "telnet_activo"];
   const sets = [];
   const values = [];
   let i = 1;
   for (const campo of permitidos) {
     if (campos[campo] !== undefined) {
+      // telnet_sucursal_id es INTEGER -- si el campo del formulario llega
+      // vacio ("", al borrar el numero) se guarda como NULL, nunca como
+      // texto vacio (eso tronaria la columna numerica).
+      let valor = campos[campo];
+      if (campo === "telnet_sucursal_id") valor = valor === "" || valor === null ? null : Number(valor);
+      if (campo === "telnet_terminal_tarjeta") valor = valor === "" ? null : valor;
       sets.push(`${campo} = $${i}`);
-      values.push(campos[campo]);
+      values.push(valor);
       i++;
     }
   }
@@ -683,14 +779,18 @@ async function crearItemMenu({ categoria, nombre, precio, descripcion, orden }) 
 }
 
 async function actualizarItemMenu(id, campos) {
-  const permitidos = ["categoria", "nombre", "precio", "descripcion", "orden", "activo"];
+  // telnet_clave_producto: NUEVO (17-nov-2026, integracion Grupo Telnet) --
+  // ver el comentario junto a esta columna en initDB().
+  const permitidos = ["categoria", "nombre", "precio", "descripcion", "orden", "activo", "telnet_clave_producto"];
   const sets = [];
   const values = [];
   let i = 1;
   for (const campo of permitidos) {
     if (campos[campo] !== undefined) {
+      let valor = campos[campo];
+      if (campo === "telnet_clave_producto" && valor === "") valor = null;
       sets.push(`${campo} = $${i}`);
-      values.push(campos[campo]);
+      values.push(valor);
       i++;
     }
   }
@@ -951,6 +1051,44 @@ async function obtenerConfiguracionRestaurante(estaticos) {
   };
 }
 
+// ── SESIONES DEL DASHBOARD (13-oct-2026) ──────────────────────────────────────
+// Ver el comentario junto a CREATE TABLE dashboard_sesiones en initDB() para
+// el porque de este cambio (antes vivian solo en memoria, se perdian en
+// cada redeploy).
+async function crearSesionDB(token, { usuario, rol, sucursal, sucursales, expira }) {
+  await pool.query(
+    `INSERT INTO dashboard_sesiones (token, usuario, rol, sucursal, sucursales, expira, ultima_actividad)
+     VALUES ($1,$2,$3,$4,$5,$6,NOW())`,
+    [token, usuario, rol, sucursal || null, sucursales ? JSON.stringify(sucursales) : null, expira]
+  );
+}
+
+async function obtenerSesionDB(token) {
+  const { rows } = await pool.query("SELECT * FROM dashboard_sesiones WHERE token=$1", [token]);
+  return rows[0] || null;
+}
+
+// Sesion "deslizante": se llama en CADA peticion valida para empujar la
+// expiracion hacia adelante, asi una sesion en uso activo no se corta sola.
+async function extenderSesionDB(token, nuevaExpira) {
+  await pool.query("UPDATE dashboard_sesiones SET expira=$1, ultima_actividad=NOW() WHERE token=$2", [nuevaExpira, token]);
+}
+
+async function eliminarSesionDB(token) {
+  await pool.query("DELETE FROM dashboard_sesiones WHERE token=$1", [token]);
+}
+
+async function eliminarSesionesVencidas() {
+  await pool.query("DELETE FROM dashboard_sesiones WHERE expira < NOW()");
+}
+
+// Todas las sesiones NO vencidas -- auth.js filtra aqui por actividad
+// reciente para armar la lista de "quien tiene el dashboard abierto ahora".
+async function obtenerTodasSesionesDB() {
+  const { rows } = await pool.query("SELECT * FROM dashboard_sesiones WHERE expira > NOW()");
+  return rows;
+}
+
 module.exports = {
   initDB,
   guardarEstadoPedido,
@@ -965,12 +1103,19 @@ module.exports = {
   guardarSessionNetpay,
   guardarTransaccionNetpay,
   marcarPedidoReembolsado,
+  crearSesionDB,
+  obtenerSesionDB,
+  extenderSesionDB,
+  eliminarSesionDB,
+  eliminarSesionesVencidas,
+  obtenerTodasSesionesDB,
   actualizarGPSPedido,
   guardarClienteDireccion,
   obtenerClientePorTelefono,
   guardarEntregaUber,
   actualizarEstadoUber,
   obtenerPedidoPorUberDeliveryId,
+  guardarResultadoTelnet,
   obtenerPedidoPorId,
   obtenerStatsPedidos,
   eliminarPedido,
@@ -981,6 +1126,7 @@ module.exports = {
   guardarHistorial,
   // Panel de administracion
   obtenerSucursales,
+  obtenerSucursalPorNombre,
   actualizarSucursal,
   insertarSucursalSiNoExiste,
   actualizarCoordenadasSucursal,

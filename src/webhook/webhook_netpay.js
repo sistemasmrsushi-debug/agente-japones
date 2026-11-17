@@ -11,6 +11,12 @@ const { consultarEstatusTransaccion } = require("../utils/netpay");
 // despacho a Uber Direct ya NO se dispara aqui (en cuanto se confirma el
 // pago) -- se movio a dashboard.js, para que se dispare hasta que la cocina
 // acepte el pedido (estado "en_proceso"). Ver src/utils/despacho_uber.js.
+// NUEVO (17-nov-2026, pedido por Diego): mandar el pedido al POS de Grupo
+// Telnet SI se dispara aqui, en cuanto se confirma el pago -- a diferencia
+// de Uber Direct, aqui no hace falta esperar a que la cocina lo acepte: el
+// chiste de esto es justo que la caja de la sucursal reciba el pedido solo,
+// sin que alguien lo tenga que volver a escribir a mano. Ver telnet_pos.js.
+const { enviarPedidoATelnet } = require("../utils/telnet_pos");
 
 
 function getTwilioClient() {
@@ -110,6 +116,17 @@ router.post("/webhook/netpay", async (req, res) => {
           // no se recalcula despues. Ver guardarTransaccionNetpay en
           // database.js y reembolsarTransaccion en utils/netpay.js.
           await db.guardarTransaccionNetpay(referenciaPedido, transactionId, lastFourDigits);
+
+          // NUEVO (17-nov-2026, pedido por Diego): en cuanto el pago queda
+          // confirmado, mandar el pedido al POS de Telnet (si la sucursal
+          // ya esta activada para eso -- ver telnet_pos.js). No se espera
+          // (await) a propósito: si Telnet tarda o falla, eso NUNCA debe
+          // retrasar ni afectar el aviso de pago confirmado al cliente, que
+          // viene justo despues. telnet_pos.js nunca lanza un error hacia
+          // afuera, pero el .catch es un segundo resguardo por si acaso.
+          enviarPedidoATelnet(pedido, { pagadaConTarjeta: true }).catch((e) =>
+            logger.error(`Error inesperado mandando el pedido ${referenciaPedido} a Telnet: ${e.message}`)
+          );
 
           // CORREGIDO (26-ago-2026, reportado por Diego en una prueba real):
           // ya NO se despacha a Uber Direct aqui. Antes el repartidor se

@@ -82,9 +82,22 @@ router.get("/api/admin/sucursales", requireGerente, async (req, res) => {
 router.put("/api/admin/sucursales/:id", requireGerente, async (req, res) => {
   try {
     const { id } = req.params;
-    const { direccion, telefono, telefono_transferencia, whatsapp, horario_apertura, horario_cierre } = req.body;
+    const {
+      direccion, telefono, telefono_transferencia, whatsapp, horario_apertura, horario_cierre,
+      // NUEVO (17-nov-2026, pedido por Diego): integracion con el POS de
+      // Grupo Telnet -- el numero de sucursal que usa Telnet (distinto del
+      // "id" interno nuestro), la terminal de cobro para pedidos pagados en
+      // linea, y el interruptor para activar/desactivar el envio automatico
+      // de pedidos a Telnet sucursal por sucursal (ver el comentario junto a
+      // estas columnas en database.js/initDB()).
+      telnet_sucursal_id, telnet_terminal_tarjeta, telnet_activo,
+    } = req.body;
+    if (telnet_sucursal_id !== undefined && telnet_sucursal_id !== "" && telnet_sucursal_id !== null &&
+        (isNaN(Number(telnet_sucursal_id)) || Number(telnet_sucursal_id) <= 0))
+      return res.status(400).json({ error: "El número de sucursal en Telnet debe ser un número mayor a 0" });
     const sucursal = await db.actualizarSucursal(id, {
       direccion, telefono, telefono_transferencia, whatsapp, horario_apertura, horario_cierre,
+      telnet_sucursal_id, telnet_terminal_tarjeta, telnet_activo,
     });
     if (!sucursal) return res.status(404).json({ error: "Sucursal no encontrada o sin cambios validos" });
     res.json(sucursal);

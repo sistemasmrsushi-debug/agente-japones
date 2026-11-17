@@ -79,7 +79,7 @@ router.post("/api/login", async (req, res) => {
     const coincide = user && await bcrypt.compare(password, user.password);
     if (!coincide)
       return res.status(401).json({ error: "Usuario o contrasena incorrectos" });
-    const token = crearSesion({ usuario: user.usuario, rol: user.rol, sucursal: user.sucursal, sucursales: user.sucursales });
+    const token = await crearSesion({ usuario: user.usuario, rol: user.rol, sucursal: user.sucursal, sucursales: user.sucursales });
     res.json({ ok: true, token, rol: user.rol, sucursal: user.sucursal, sucursales: user.sucursales, usuario: user.usuario });
   } catch (err) {
     logger.error("Error en login: " + err.message);
@@ -87,10 +87,37 @@ router.post("/api/login", async (req, res) => {
   }
 });
 
-router.post("/api/logout", requireAuth, (req, res) => {
-  const token = (req.headers["authorization"] || "").replace("Bearer ", "");
-  cerrarSesion(token);
-  res.json({ ok: true });
+router.post("/api/logout", requireAuth, async (req, res) => {
+  try {
+    const token = (req.headers["authorization"] || "").replace("Bearer ", "");
+    await cerrarSesion(token);
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error("Error en logout: " + err.message);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// NUEVO (13-oct-2026, reportado por Diego: "se cerraba cuando refrescaba la
+// pagina"): el dashboard guardaba el token de la sesion en localStorage,
+// pero nunca tenia forma de preguntarle al servidor "¿de quien es este
+// token y sigue siendo valido?" al volver a cargar la pagina -- por eso
+// SIEMPRE se mostraba la pantalla de login en cada refresh, aunque el token
+// siguiera vivo del lado del servidor (ver dashboard_sesiones en
+// database.js). requireAuth ya valida el token y deja todo lo necesario en
+// req.sesion; aqui solo se regresa en el mismo formato que /api/login para
+// que el dashboard pueda reconstruir la sesion sin pedir usuario/contraseña
+// de nuevo.
+router.get("/api/sesion", requireAuth, async (req, res) => {
+  const token = (req.headers["authorization"] || "").replace("Bearer ", "") || req.query.token || "";
+  res.json({
+    ok: true,
+    token,
+    rol: req.sesion.rol,
+    sucursal: req.sesion.sucursal,
+    sucursales: req.sesion.sucursales,
+    usuario: req.sesion.usuario,
+  });
 });
 
 router.get("/api/pedidos", requireAuth, async (req, res) => {
@@ -409,9 +436,9 @@ router.post("/api/sistema/probar", requireGerente, async (req, res) => {
 });
 
 // Solo el gerente puede ver que sucursales tienen el dashboard abierto ahora mismo.
-router.get("/api/sesiones-activas", requireGerente, (req, res) => {
+router.get("/api/sesiones-activas", requireGerente, async (req, res) => {
   try {
-    res.json(obtenerSesionesActivas());
+    res.json(await obtenerSesionesActivas());
   } catch (err) {
     logger.error("Error obteniendo sesiones activas: " + err.message);
     res.status(500).json({ error: "Error interno" });
